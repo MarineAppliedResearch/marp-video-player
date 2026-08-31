@@ -125,6 +125,45 @@ window.marpPlayer = player;
  */
 window.loadItem = (itemId, qualityOption) => player.loadItem(itemId, qualityOption);
 
+// --- Page-wide drop target ----------------------------------------------
+//
+// This page constructs the player with `input: false` above, so the library's
+// own drag-and-drop listeners are never attached here -- dropping a file did
+// nothing but make the browser navigate away and play it itself, losing the
+// page. Input stays off, because the page owns the keyboard exactly as the C#
+// host does; the drop is handled here instead.
+//
+// Document-level rather than on #playerMount: the player is one box on a
+// taller page, and a file dropped on the margins or the panels below would
+// still be taken by the browser.
+/** The player's root, for the same drag feedback the library shows. */
+const playerRoot = () => document.querySelector(".marp-player");
+
+document.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    const root = playerRoot();
+    if (root) root.classList.add("marp-drag-over");
+});
+
+document.addEventListener("dragleave", (event) => {
+    // Fires between children too; only clear when the pointer left the window.
+    if (event.relatedTarget === null) {
+        const root = playerRoot();
+        if (root) root.classList.remove("marp-drag-over");
+    }
+});
+
+document.addEventListener("drop", (event) => {
+    event.preventDefault();
+    const root = playerRoot();
+    if (root) root.classList.remove("marp-drag-over");
+    const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+    if (file) {
+        player.loadFile(file);
+    }
+});
+
 // Toggles the built-in GUI from outside the player, which is what a host
 // with its own transport and scrub bar does. Only visibility changes --
 // input handling is fixed at construction (the `input` option), so the

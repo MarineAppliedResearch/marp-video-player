@@ -1196,11 +1196,34 @@ export class MarpVideoPlayer {
         // of this, and a stray drop or click here would fight it -- a
         // dropped file would replace what the host loaded.
         if (this.inputEnabled) {
-            // dragover must be prevented, or the browser navigates to the
-            // dropped file instead of handing it over.
-            el.canvas.addEventListener('dragover', (event) => event.preventDefault());
-            el.canvas.addEventListener('drop', (event) => {
+            // Listen on the root, not the canvas. The centre overlay is
+            // `position: absolute; inset: 0`, so it covers the canvas
+            // completely -- and it is shown until the first frame is
+            // presented, which is exactly the state you are in when dropping
+            // a file to load one. A drop aimed at the video landed on the
+            // overlay, where nothing handled it, and since dragover was not
+            // prevented there either the browser navigated to the file
+            // instead. Listening on the root catches the drop wherever it
+            // lands, whatever is layered on top.
+            this.root.addEventListener('dragover', (event) => {
+                // Must be prevented, or the browser navigates to the dropped
+                // file rather than handing it over.
                 event.preventDefault();
+                if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+                this.root.classList.add('marp-drag-over');
+            });
+
+            // dragleave fires when moving between children too, so only clear
+            // the state when the pointer has actually left the player.
+            this.root.addEventListener('dragleave', (event) => {
+                if (!this.root.contains(event.relatedTarget)) {
+                    this.root.classList.remove('marp-drag-over');
+                }
+            });
+
+            this.root.addEventListener('drop', (event) => {
+                event.preventDefault();
+                this.root.classList.remove('marp-drag-over');
                 const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
                 if (file) {
                     this.loadFile(file);

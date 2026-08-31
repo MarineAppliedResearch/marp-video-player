@@ -86,6 +86,27 @@ export const PLAYER_CSS = `
     box-shadow: none;
 }
 
+/* While a file is being dragged over the player. Drop is handled on the root,
+   so the whole player area is the target and the feedback covers all of it. */
+.marp-player.marp-drag-over::after {
+    content: 'Drop a video file to play it';
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    border: 2px dashed var(--cyan-400);
+    background: rgba(1, 5, 13, 0.72);
+    color: var(--cyan-300);
+    font: 600 15px/1.3 system-ui, sans-serif;
+    text-align: center;
+    padding: 12px;
+    /* The overlay is decoration: it must never become the drop target itself. */
+    pointer-events: none;
+}
+
 .marp-player .marp-canvas {
     display: block;
     width: 100%;
