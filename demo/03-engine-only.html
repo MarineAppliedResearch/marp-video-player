@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>MARP Video Player — engine only</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 24px;
+            background: #01050d;
+            color: #c9d6e4;
+            font: 15px/1.5 system-ui, sans-serif;
+        }
+        h1 { font-size: 18px; margin: 0 0 4px; color: #64f6f2; }
+        p  { margin: 0 0 18px; color: #7f92a6; }
+        canvas { width: 100%; max-width: 960px; aspect-ratio: 16 / 9; background: #000; display: block; }
+        .row { margin-top: 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        button, input[type=file] {
+            background: #07233a; color: #c9d6e4; border: 1px solid #0e3a5c;
+            border-radius: 6px; padding: 7px 12px; font: inherit; cursor: pointer;
+        }
+        button:hover { border-color: #22d7dc; color: #64f6f2; }
+        #clock { color: #c7ff62; font-variant-numeric: tabular-nums; }
+    </style>
+</head>
+<body>
+    <h1>Engine only, your own interface</h1>
+    <p>
+        No built-in controls. The engine decodes to a canvas you own, and the
+        controls below are plain HTML. This is the shape to use when your
+        application already has its own transport and scrub bar.
+    </p>
+
+    <canvas id="screen"></canvas>
+
+    <div class="row">
+        <input type="file" id="file" accept="video/mp4,video/*">
+        <button id="play">Play</button>
+        <button id="pause">Pause</button>
+        <button id="reverse">Reverse</button>
+        <span id="clock">--:--</span>
+    </div>
+
+    <script type="module">
+        import { createMarpVideoEngine, LocalFileMediaSource } from '../dist/marp-video-player.js';
+
+        const canvas = document.getElementById('screen');
+        const clock = document.getElementById('clock');
+        let engine = null;
+
+        document.getElementById('file').addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            // A media source describes where bytes come from. Swap this for
+            // UrlMediaSource or a Jellyfin source without changing anything
+            // else.
+            engine = await createMarpVideoEngine(canvas, {
+                mediaSource: new LocalFileMediaSource({ file }),
+            });
+
+            // Drive your own clock from the engine rather than polling it.
+            setInterval(() => {
+                if (!engine) return;
+                const t = engine.currentTime;
+                clock.textContent = `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+            }, 100);
+        });
+
+        document.getElementById('play').onclick = () => engine && (engine.playbackRate = 1, engine.play());
+        document.getElementById('pause').onclick = () => engine && engine.pause();
+        document.getElementById('reverse').onclick = () => engine && (engine.playbackRate = -1, engine.play());
+    </script>
+</body>
+</html>

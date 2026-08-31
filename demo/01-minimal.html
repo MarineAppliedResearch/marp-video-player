@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>MARP Video Player — minimal</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 24px;
+            background: #01050d;
+            color: #c9d6e4;
+            font: 15px/1.5 system-ui, sans-serif;
+        }
+        h1 { font-size: 18px; margin: 0 0 4px; color: #64f6f2; }
+        p  { margin: 0 0 18px; color: #7f92a6; }
+        #player { width: 100%; max-width: 960px; aspect-ratio: 16 / 9; }
+    </style>
+</head>
+<body>
+    <h1>Minimal embed</h1>
+    <p>The smallest thing that works: one container, one import, one call.</p>
+
+    <div id="player"></div>
+
+    <!--
+        Loaded as an ES module. The bundle is self-contained, so there is
+        nothing else to install and no import map to configure.
+
+        In your own project this would be:
+            import { createMarpVideoPlayer } from 'marp-video-player';
+    -->
+    <script type="module">
+        import { createMarpVideoPlayer } from '../dist/marp-video-player.js';
+
+        // A complete player: picture, transport controls, scrub bar, and a
+        // settings menu for loading a file or signing in to a video server.
+        createMarpVideoPlayer(document.getElementById('player'));
+
+        // To load something immediately instead of waiting for the user:
+        //   const player = createMarpVideoPlayer(el);
+        //   await player.loadUrl('https://example.org/dive-165.mp4');
+    </script>
+</body>
+</html>
