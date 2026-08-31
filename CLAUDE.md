@@ -4,7 +4,7 @@ A frame-accurate WebCodecs video player. One component of the [MARP platform](ht
 
 ## Conventions
 
-- **Commit authorship is Isaac only.** Never add Claude as author or co-author, and never a `Co-Authored-By` trailer. Applies to merge and squash commits too.
+- **Commit authorship is Human only.** Never add Claude as author or co-author, and never a `Co-Authored-By` trailer. Applies to merge and squash commits too.
 - **Short commit messages.** Subject under ~72 characters plus a few one-line bullets. Reference the issue (`Refs #NN`, `Closes #NN`).
 - **Branch per issue**, named for it: `2-drag-and-drop-does-not-load`. Never commit directly to `master`.
 - **Never commit credentials.** `.env` and `app/dev-config.js` are git-ignored; `.env.example` documents the variable names. This repository is public.
