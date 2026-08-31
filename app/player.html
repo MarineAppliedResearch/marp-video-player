@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <title>MARP player</title>
+        <style>
+            /* The player fills the window; it brings its own styling. */
+            html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+            #playerMount { width: 100%; height: 100%; }
+        </style>
+    </head>
+    <body>
+        <div id="playerMount"></div>
+
+        <script src="dist/marp-video-engine.js"></script>
+        <script>
+            /*
+             * Host-facing player page.
+             *
+             * Mounts the complete player -- picture, transport, scrub bar,
+             * spinner, settings menu -- from the library, and exposes the
+             * loaded engine as window.marpVideo (and window.mareVideo, so an
+             * existing WebView2 host's ExecuteScript strings keep working).
+             *
+             * With no parameters at all this still comes up as a usable
+             * player: sign in and pick an item from its own settings menu.
+             * The parameters below just skip that.
+             *
+             * A Jellyfin item, preferred because the library then handles
+             * path selection and, on the transcode path, maintains the behind
+             * sessions that make reverse playback fast:
+             *   server, token, user   the host's existing Jellyfin session
+             *   item                  item id
+             *   mode                  directPlay (default) | transcode
+             *
+             * Or a plain media URL:
+             *   src   an .m3u8 is a Jellyfin HLS transcode stream; anything
+             *         else is read as an MP4 by byte range, which covers a
+             *         local file served through a WebView2 virtual-host
+             *         folder mapping.
+             *
+             * Both accept:
+             *   fit   optional. contain (default) | cover | fill | none,
+             *         matching the host's Stretch.
+             *   controls  optional. 1 (default) shows the built-in player UI;
+             *         0 leaves picture, buffering spinner and placeholder mark
+             *         only, for a host that draws its own chrome. Input on the
+             *         video (click-to-play, drag-and-drop, hotkeys) follows it.
+             *   input optional. Overrides that: 1 keeps the speed/space
+             *         hotkeys even with controls off.
+             *   segments  optional. Push segmentindex|/segments| for a host
+             *         drawing its own scrub bar shading. Defaults on when
+             *         controls=0; 0 disables.
+             *   segmentIntervalMs  optional. Default 250.
+             *   rawCacheBytes / decodedCacheBytes  optional overrides.
+             *
+             * Progress and errors are posted to the host as status| messages,
+             * alongside metadata| and frame|, by the library's WebView2
+             * bridge -- in the format MareMediaElement already parses.
+             */
+            (function () {
+                const params = new URLSearchParams(window.location.search);
+
+                /** Posts a line to the host in the same status| channel the bridge uses. */
+                function postStatus(text) {
+                    console.log('[player] ' + text);
+                    if (window.chrome && window.chrome.webview) {
+                        window.chrome.webview.postMessage('status|' + text);
+                    }
+                }
+
+                /** Reads a positive number parameter, or undefined. */
+                function numberParam(name) {
+                    const raw = params.get(name);
+                    const value = raw === null ? NaN : Number(raw);
+                    return Number.isFinite(value) && value > 0 ? value : undefined;
+                }
+
+                if (typeof VideoDecoder === 'undefined') {
+                    postStatus('error WebCodecs unavailable -- the page must be served from a secure context (https or localhost), not NavigateToString');
+                    return;
+                }
+
+                const server = params.get('server');
+                const token = params.get('token');
+                const user = params.get('user');
+
+                // A host with its own transport, scrub bar and menus passes
+                // controls=0. Input on the video goes with them, so the
+                // host's own overlay owns every click and keystroke; pass
+                // input=1 to keep the speed hotkeys anyway.
+                const controls = params.get('controls') !== '0';
+                const inputParam = params.get('input');
+
+                const player = MarpVideoEngine.createMarpVideoPlayer(document.getElementById('playerMount'), {
+                    // Fill the host window rather than holding a 16:9 box.
+                    aspectRatio: null,
+                    maxWidth: null,
+                    controls,
+                    input: inputParam === null ? undefined : inputParam !== '0',
+                    // A host drawing its own scrub bar wants the shading data
+                    // pushed; one segmentindex| per load, then segments| on a
+                    // timer. Defaults on when controls are off, since that is
+                    // the host that needs it.
+                    segmentUpdates: params.get('segments') === '0' ? false : !controls,
+                    segmentIntervalMs: numberParam('segmentIntervalMs'),
+                    jellyfin: server && token ? { serverUrl: server, accessToken: token, userId: user } : undefined,
+                    defaultItemId: params.get('item') || '',
+                    rawCacheGiB: numberParam('rawCacheBytes') ? numberParam('rawCacheBytes') / (1024 * 1024 * 1024) : undefined,
+                    decodedCacheGiB: numberParam('decodedCacheBytes') ? numberParam('decodedCacheBytes') / (1024 * 1024 * 1024) : undefined,
+                    // Both names, and the host's message channel: marpVideo is
+                    // the current global, mareVideo keeps an existing host's
+                    // injected scripts working.
+                    exposeGlobals: true,
+                    webview2Bridge: true,
+                    // Deliberately no onLog -> postStatus: the library
+                    // already logs to the console, and forwarding every
+                    // debug line (one per fetch/decode, plus one per tenth
+                    // frame) would flood the host's message channel. The
+                    // bridge posts the status|/metadata|/frame| lines the
+                    // host actually parses.
+                });
+
+                window.marpPlayer = player;
+
+                const fit = params.get('fit');
+                if (fit) {
+                    // A canvas is a replaced element, so object-fit applies --
+                    // this mirrors the Stretch the host asks for.
+                    document.querySelector('.marp-canvas').style.objectFit = fit;
+                }
+
+                /** Loads whatever the URL asked for, if it asked for anything. */
+                async function autoload() {
+                    const src = params.get('src');
+                    const item = params.get('item');
+
+                    if (src) {
+                        postStatus('source=url');
+                        await player.loadUrl(src);
+                        return;
+                    }
+                    if (!item) {
+                        postStatus('ready-idle sign in and pick an item from the player menu');
+                        return;
+                    }
+
+                    const wantsTranscode = params.get('mode') === 'transcode';
+                    postStatus('source=jellyfin ' + (wantsTranscode ? 'transcode' : 'directPlay'));
+
+                    // Direct Play is the library's own default pick, so only
+                    // the transcode case needs a tier chosen explicitly.
+                    let tier = null;
+                    if (wantsTranscode) {
+                        const tiers = await player.probeQualityOptions(item);
+                        tier = tiers.find((option) => !option.directPlay) || null;
+                    }
+
+                    const engine = await player.loadItem(item, tier);
+                    if (engine) {
+                        postStatus('ready ' + engine.videoWidth + 'x' + engine.videoHeight + ' ' + engine.fps + 'fps ' + engine.duration.toFixed(3) + 's');
+                    }
+                }
+
+                autoload().catch((err) => postStatus('error ' + (err && err.message ? err.message : err)));
+            })();
+        </script>
+    </body>
+</html>

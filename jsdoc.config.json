@@ -1,0 +1,25 @@
+{
+  "source": {
+    "include": ["src"],
+    "excludePattern": "(node_modules|dist)"
+  },
+  "opts": {
+    "destination": "docs/generated",
+    "recurse": true,
+    "template": "node_modules/docdash",
+    "readme": "README.md"
+  },
+  "plugins": ["plugins/markdown"],
+  "templates": {
+    "cleverLinks": false,
+    "monospaceLinks": false,
+    "default": {
+      "outputSourceFiles": true
+    }
+  },
+  "docdash": {
+    "search": true,
+    "collapse": true,
+    "sectionOrder": ["Modules", "Classes", "Global"]
+  }
+}

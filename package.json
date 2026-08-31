@@ -1,0 +1,62 @@
+{
+  "name": "marp-video-player",
+  "version": "0.1.0",
+  "description": "Reusable JavaScript/WebCodecs video player for the MARP platform: frame-accurate playback, reverse playback, and multiple media sources including Jellyfin.",
+  "type": "module",
+  "main": "./dist/marp-video-player.js",
+  "module": "./dist/marp-video-player.js",
+  "exports": {
+    ".": {
+      "import": "./dist/marp-video-player.js",
+      "default": "./dist/marp-video-player.js"
+    },
+    "./standalone": "./dist/marp-video-player.standalone.js",
+    "./src/*": "./src/*"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node build.js",
+    "harness": "node test/probes/harness/serve.mjs",
+    "test": "npm run test:unit",
+    "test:unit": "jest --forceExit",
+    "test:e2e": "playwright test",
+    "docs": "jsdoc -c jsdoc.config.json --lenient"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MarineAppliedResearch/marp-video-player.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MarineAppliedResearch/marp-video-player/issues"
+  },
+  "homepage": "https://github.com/MarineAppliedResearch/marp-video-player#readme",
+  "author": "Isaac Assegai Travers",
+  "license": "Apache-2.0",
+  "keywords": [
+    "video",
+    "webcodecs",
+    "player",
+    "jellyfin",
+    "marp",
+    "frame-accurate"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "mp4box": "^2.4.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "docdash": "^2.0.2",
+    "esbuild": "^0.28.1",
+    "jest": "^30.4.2",
+    "jsdoc": "^4.0.5",
+    "playwright": "^1.62.1"
+  }
+}

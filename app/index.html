@@ -1,0 +1,306 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Marp Video Player -- Test Harness</title>
+    <style>
+        /* Page chrome only. Everything the player looks like ships inside
+           the bundle now -- if this file ever needs a player style again,
+           something has leaked back out of the library. */
+        body {
+            font-family: sans-serif;
+            background: #01050d;
+            color: #8198a8;
+            margin: 0;
+            padding: 16px;
+        }
+
+        h1 {
+            font-size: 14px;
+            font-weight: normal;
+            margin: 0 0 12px;
+        }
+
+        #playerMount {
+            max-width: 960px;
+        }
+
+        /* Harness controls, deliberately outside the player: they drive the
+           library from where a host would, not from inside its own UI. */
+        #harnessBar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 12px;
+            max-width: 960px;
+        }
+
+        #harnessBar button {
+            background: #051828;
+            color: #c7d4dd;
+            border: 1px solid rgba(42, 214, 220, 0.28);
+            border-radius: 4px;
+            padding: 6px 12px;
+            cursor: pointer;
+        }
+
+        #harnessBar button:hover {
+            border-color: rgba(42, 214, 220, 0.52);
+            color: #64f6f2;
+        }
+
+        #harnessBarNote {
+            font-size: 11px;
+            color: #587181;
+        }
+
+        /* Host-simulator panel: every control here drives the library through
+           its public API only, never by reaching into the player's DOM. If
+           something cannot be done from this panel, a C# host cannot do it
+           either -- that is the point of the panel. */
+        #hostPanel {
+            max-width: 960px;
+            margin-top: 14px;
+            border: 1px solid rgba(42, 214, 220, 0.28);
+            border-radius: 6px;
+            padding: 10px 12px;
+        }
+
+        .host-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+            padding: 6px 0;
+        }
+
+        .host-row + .host-row {
+            border-top: 1px solid rgba(42, 214, 220, 0.12);
+        }
+
+        .host-label {
+            width: 92px;
+            flex: none;
+            font-size: 11px;
+            color: #64f6f2;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        #hostPanel button {
+            background: #051828;
+            color: #c7d4dd;
+            border: 1px solid rgba(42, 214, 220, 0.28);
+            border-radius: 4px;
+            padding: 5px 10px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        #hostPanel button:hover {
+            border-color: rgba(42, 214, 220, 0.52);
+            color: #64f6f2;
+        }
+
+        #hostPanel input, #hostPanel select {
+            background: #020814;
+            color: #c7d4dd;
+            border: 1px solid rgba(42, 214, 220, 0.28);
+            border-radius: 4px;
+            padding: 4px 6px;
+            font-size: 12px;
+        }
+
+        #hostPanel input[type="text"], #hostPanel input[type="password"] {
+            width: 130px;
+        }
+
+        #hostPanel input[type="number"] {
+            width: 70px;
+        }
+
+        /* Mock host scrub bar: drawn only from the segmentindex|/segments|/
+           frame| messages a WebView2 host receives, never from the player's
+           own DOM or getSegmentStates(). Same colour convention as the
+           built-in bar so the two can be compared at a glance. */
+        #hostScrubTrack {
+            position: relative;
+            height: 22px;
+            border-radius: 6px;
+            background: rgba(199, 212, 221, 0.15);
+            overflow: hidden;
+            cursor: pointer;
+            flex: 1;
+            min-width: 300px;
+            touch-action: none;
+        }
+
+        .host-seg {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+        }
+
+        .host-seg.fetched { background: #2d9cff; }
+        .host-seg.decoded { background: #a7ec35; }
+        .host-seg.pinned { box-shadow: inset 0 0 0 3px #22d7dc; }
+
+        /* z-index because the segment blocks are appended after this element:
+           absolutely positioned siblings paint in DOM order, so without it
+           the blocks bury the playhead. */
+        #hostScrubHandle {
+            position: absolute;
+            top: -2px;
+            bottom: -2px;
+            width: 3px;
+            margin-left: -1px;
+            background: #f7fbff;
+            box-shadow: 0 0 6px rgba(1, 5, 13, 0.9);
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        /* A knob on top of the line, so the playhead is findable against
+           whatever colour the segment under it happens to be. */
+        #hostScrubHandle::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 13px;
+            height: 13px;
+            border-radius: 50%;
+            background: #f7fbff;
+            border: 2px solid #01050d;
+            transform: translate(-50%, -50%);
+        }
+
+        #hostScrubReadout {
+            font-family: monospace;
+            font-size: 11px;
+            color: #8198a8;
+            width: 100%;
+        }
+
+        .host-keys {
+            font-family: monospace;
+            font-size: 11px;
+            color: #8198a8;
+            line-height: 1.7;
+        }
+
+        #hostReadout {
+            font-family: monospace;
+            font-size: 11.5px;
+            color: #a7ec35;
+            padding-top: 8px;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <h1>Marp Video Player -- test harness. The player below, controls and all, is built entirely by
+        dist/marp-video-engine.js; open the console for engine logs.</h1>
+
+    <div id="playerMount"></div>
+
+    <div id="harnessBar">
+        <button id="toggleControlsButton" type="button">Hide player controls</button>
+        <span id="harnessBarNote">Simulates a host that draws its own chrome (controls: false).</span>
+    </div>
+
+    <div id="hostPanel">
+        <div class="host-row">
+            <span class="host-label">Transport</span>
+            <button id="hPlay" type="button">Play</button>
+            <button id="hPause" type="button">Pause</button>
+            <button id="hStepBack" type="button">&laquo; Step</button>
+            <button id="hStepFwd" type="button">Step &raquo;</button>
+            <button id="hMute" type="button">Mute</button>
+            <button id="hFullscreen" type="button">Fullscreen</button>
+        </div>
+
+        <div class="host-row">
+            <span class="host-label">Rate</span>
+            <button id="hRateRev" type="button">-1x</button>
+            <button id="hRateHalf" type="button">0.5x</button>
+            <button id="hRateOne" type="button">1x</button>
+            <button id="hRateFast" type="button">6x</button>
+            <input id="hRateInput" type="number" step="0.1" value="1">
+            <button id="hRateSet" type="button">Set rate</button>
+        </div>
+
+        <div class="host-row">
+            <span class="host-label">Seek</span>
+            <input id="hSeekInput" type="number" step="1" value="30">
+            <button id="hSeekTo" type="button">Seek to (s)</button>
+            <button id="hSeekBack10" type="button">-10s</button>
+            <button id="hSeekFwd10" type="button">+10s</button>
+            <button id="hSeekStart" type="button">Start</button>
+            <button id="hSeekEnd" type="button">End</button>
+        </div>
+
+        <div class="host-row">
+            <span class="host-label">Sign in</span>
+            <input id="hServer" type="text" placeholder="http://host:port">
+            <input id="hUser" type="text" placeholder="username">
+            <input id="hPass" type="password" placeholder="password">
+            <button id="hLogin" type="button">Sign in</button>
+            <button id="hLogout" type="button">Sign out</button>
+        </div>
+
+        <div class="host-row">
+            <span class="host-label">Load</span>
+            <input id="hItem" type="text" placeholder="jellyfin item id">
+            <button id="hLoadItem" type="button">Load item</button>
+            <button id="hProbe" type="button">Probe qualities</button>
+            <select id="hQuality"><option value="">(probe first)</option></select>
+            <button id="hLoadQuality" type="button">Load at quality</button>
+        </div>
+
+        <div class="host-row">
+            <span class="host-label">Source</span>
+            <input id="hFile" type="file" accept="video/mp4,video/*">
+            <input id="hUrl" type="text" placeholder="media url (.m3u8 or mp4)">
+            <button id="hLoadUrl" type="button">Load URL</button>
+        </div>
+
+        <div class="host-row">
+            <span class="host-label">Cache</span>
+            <input id="hRawGiB" type="number" min="0.25" step="0.25" value="3">
+            <input id="hDecodedGiB" type="number" min="0.25" step="0.25" value="5">
+            <button id="hApplyCache" type="button">Apply GiB</button>
+            <button id="hReadCache" type="button">Read config</button>
+        </div>
+
+        <div class="host-row">
+            <span class="host-label">Diagnostics</span>
+            <button id="hDump" type="button">Dump state</button>
+            <button id="hSegments" type="button">Segment states</button>
+            <button id="hEncoded" type="button">Encoded (host wire format)</button>
+            <button id="hClose" type="button">Close engine</button>
+        </div>
+
+        <div class="host-row">
+            <span class="host-label">Host bar</span>
+            <div id="hostScrubTrack">
+                <div id="hostScrubHandle" style="left: 0"></div>
+            </div>
+        </div>
+        <div class="host-row">
+            <span class="host-label"></span>
+            <span id="hostScrubReadout">waiting for segmentindex| ...</span>
+        </div>
+
+        <div class="host-row">
+            <span class="host-label">Shortcuts</span>
+            <span id="hostKeys" class="host-keys"></span>
+        </div>
+
+        <div id="hostReadout">no engine loaded</div>
+    </div>
+
+    <script src="dist/marp-video-engine.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

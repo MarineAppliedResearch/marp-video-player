@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <title>WebView2 verification — MARP video engine</title>
+        <style>
+            body { font: 13px/1.55 ui-monospace, Menlo, Consolas, monospace; margin: 16px; background: #111; color: #ddd; }
+            h3 { margin: 18px 0 6px; }
+            .row { padding: 4px 6px; border-left: 3px solid #444; margin: 3px 0; }
+            .pass { border-color: #3a8; } .fail { border-color: #d55; } .warn { border-color: #da3; } .info { border-color: #555; }
+            .fix { color: #ffb; display: block; margin-top: 2px; }
+            input { font: inherit; background: #000; color: #ddd; border: 1px solid #444; padding: 2px 4px; }
+            button { font: inherit; padding: 4px 10px; margin: 2px 6px 2px 0; }
+            #drop { border: 2px dashed #555; padding: 18px; text-align: center; margin: 8px 0; }
+            #summary { white-space: pre; border: 1px solid #333; padding: 8px; margin-top: 10px; max-height: 40vh; overflow: auto; }
+            canvas { width: 320px; border: 1px solid #333; background: #000; }
+        </style>
+    </head>
+    <body>
+        <h2>WebView2 verification</h2>
+        <p class="info">
+            Runs every capability the MARP video engine depends on, and says what to change when one fails. Open this page inside the WebView2 host. Checks 1–3 run automatically; 4 needs
+            a file; 5–6 are prefilled with the dev Jellyfin instance (port 8097 — never production) so they are one click.
+        </p>
+
+        <h3>1–3. Environment, decode, byte ranges</h3>
+        <div id="auto"></div>
+
+        <h3>4. Local file (picker or drag-and-drop)</h3>
+        <div>
+            <input id="file" type="file" accept="video/*" />
+        </div>
+        <div id="drop">…or drop a video file here</div>
+        <div id="localResults"></div>
+
+        <h3>5–6. Jellyfin (Direct Play and transcode)</h3>
+        <div>
+            <label>server <input id="server" size="30" value="" placeholder="http://host:port" /></label>
+            <label>user <input id="user" size="10" value="" placeholder="username" /></label>
+            <label>pass <input id="pass" type="password" size="16" value="" /></label>
+            <label>item id <input id="item" size="34" value="fb6a3c0fbd5e073d40e0840b9a54b79c" /></label>
+        </div>
+        <div><button id="runJellyfin">Run Jellyfin checks</button></div>
+        <div id="jellyfinResults"></div>
+
+        <h3>Playback target</h3>
+        <canvas id="canvas" width="640" height="360"></canvas>
+
+        <h3>Summary — copy this back</h3>
+        <div><button id="copy">Copy summary</button></div>
+        <div id="summary"></div>
+
+        <script src="dist/marp-video-engine.js"></script>
+        <script>
+            const lines = [];
+
+            /** Renders one result row and records it for the copyable summary. */
+            function report(target, status, label, detail, fix) {
+                const row = document.createElement('div');
+                row.className = `row ${status}`;
+                row.textContent = `[${status.toUpperCase()}] ${label}${detail ? ' — ' + detail : ''}`;
+                if (fix) {
+                    const hint = document.createElement('span');
+                    hint.className = 'fix';
+                    hint.textContent = 'FIX: ' + fix;
+                    row.appendChild(hint);
+                }
+                document.getElementById(target).appendChild(row);
+                lines.push(`[${status.toUpperCase()}] ${label}${detail ? ' — ' + detail : ''}${fix ? '\n    FIX: ' + fix : ''}`);
+                document.getElementById('summary').textContent = lines.join('\n');
+            }
+
+            // --- 0. Is the engine bundle even here? -----------------------------
+            // Checked first and loudly: without it every check below fails in
+            // a confusing way, and the most common cause is a build that did
+            // not copy dist/ next to this page.
+            const bundleLoaded = typeof window.MarpVideoEngine !== 'undefined';
+
+            // --- 1. Environment -------------------------------------------------
+            const inWebView = Boolean(window.chrome && window.chrome.webview);
+            report('auto', 'info', 'host', inWebView ? 'running inside WebView2' : 'running in a plain browser (not WebView2)');
+            report('auto', 'info', 'origin', `${location.origin || '(opaque)'} — protocol ${location.protocol}`);
+            report('auto', 'info', 'user agent', navigator.userAgent);
+
+            if (window.isSecureContext) {
+                report('auto', 'pass', 'secure context', 'isSecureContext = true');
+            } else {
+                report(
+                    'auto',
+                    'fail',
+                    'secure context',
+                    'isSecureContext = false',
+                    'WebCodecs is unavailable without one. The host must NAVIGATE to a real origin rather than injecting HTML: either ' +
+                        'SetVirtualHostNameToFolderMapping (https://appassets/...) or a small local listener on http://127.0.0.1 (localhost counts as secure). ' +
+                        'NavigateToString gives an opaque origin and will always fail this.',
+                );
+            }
+
+            if (bundleLoaded) {
+                report('auto', 'pass', 'engine bundle', 'dist/marp-video-engine.js loaded');
+            } else {
+                report('auto', 'fail', 'engine bundle', 'dist/marp-video-engine.js did NOT load -- window.MarpVideoEngine is undefined',
+                    'Every playback check below will fail until this is fixed. The file must sit at dist/marp-video-engine.js RELATIVE TO THIS PAGE, ' +
+                        'and in a C# project a newly added file defaults to "Do not copy" -- set Copy to Output Directory = Copy if newer and check bin\\...\\player\\dist\\.');
+            }
+
+            if (typeof VideoDecoder === 'undefined') {
+                report('auto', 'fail', 'WebCodecs', 'VideoDecoder is undefined', 'Almost always a consequence of the secure-context failure above. Fix that first, then re-run.');
+            } else {
+                report('auto', 'pass', 'WebCodecs', 'VideoDecoder is available');
+            }
+
+            // --- 2. Decode capability -------------------------------------------
+            async function checkDecode() {
+                if (typeof VideoDecoder === 'undefined') return;
+                for (const [name, codec] of [
+                    ['H.264 Main (archive standard)', 'avc1.4d4028'],
+                    ['H.264 High (recent projects)', 'avc1.640028'],
+                ]) {
+                    try {
+                        const support = await VideoDecoder.isConfigSupported({ codec, codedWidth: 1920, codedHeight: 1080 });
+                        report('auto', support.supported ? 'pass' : 'fail', `decode ${name}`, `${codec} supported=${support.supported}`,
+                            support.supported ? null : 'This runtime cannot decode the archive’s own codec; that footage would have to be transcoded.');
+                    } catch (err) {
+                        report('auto', 'fail', `decode ${name}`, String(err), 'isConfigSupported threw, which usually means WebCodecs is present but crippled in this runtime.');
+                    }
+                }
+            }
+
+            // --- 3. Byte ranges over a blob: URL --------------------------------
+            // LocalFileMediaSource reads a File through an object URL with Range
+            // requests, so this one decides whether local playback can work at all.
+            async function checkBlobRange() {
+                try {
+                    const data = new Uint8Array(100000).map((_, i) => i % 251);
+                    const url = URL.createObjectURL(new Blob([data]));
+                    const res = await fetch(url, { headers: { Range: 'bytes=1000-1999' } });
+                    const bytes = new Uint8Array(await res.arrayBuffer());
+                    URL.revokeObjectURL(url);
+                    const correct = res.status === 206 && bytes.length === 1000 && bytes[0] === 1000 % 251;
+                    report('auto', correct ? 'pass' : 'fail', 'blob: URL honours Range',
+                        `status=${res.status}, bytes=${bytes.length}, first=${bytes[0]}`,
+                        correct ? null 
+                            : 'Local files read bytes this way. If this fails, the engine needs a Blob.slice()-based reader instead — tell me and I will add one; it is a contained change.');
+                } catch (err) {
+                    report('auto', 'fail', 'blob: URL honours Range', String(err), 'Same remedy: a Blob.slice() reader.');
+                }
+            }
+
+            // --- 3b. Byte ranges over the page's OWN origin ----------------------
+            // In the host the page is served by a WebView2 virtual-host folder
+            // mapping. Whether that mapping answers Range requests with 206
+            // decides how local files can be read there: a URL-based source if
+            // it does, a File-based one if it does not. Nothing had tested it.
+            async function checkSameOriginRange() {
+                try {
+                    const res = await fetch('dist/marp-video-engine.js', { headers: { Range: 'bytes=100-199' } });
+                    const bytes = new Uint8Array(await res.arrayBuffer());
+                    const ok = res.status === 206 && bytes.length === 100;
+                    report('auto', ok ? 'pass' : 'fail', 'same-origin Range (this page\'s host)',
+                        `status=${res.status}, bytes=${bytes.length}, Content-Range=${res.headers.get('Content-Range') || 'none'}`,
+                        ok ? null
+                            : 'This origin ignores Range and returns whole files. Local video cannot then be read by byte range from a virtual-host URL — ' +
+                              'the host must hand the page a File instead (picker/drag-drop), or serve media through a WebResourceRequested handler that honours Range.');
+                } catch (err) {
+                    report('auto', 'fail', 'same-origin Range (this page\'s host)', String(err));
+                }
+            }
+
+            // --- shared playback exercise ---------------------------------------
+            /** Loads an engine and checks forward, reverse and a one-frame step. */
+            async function exercise(target, label, options) {
+                let engine = null;
+                try {
+                    if (window.marpVideo) window.marpVideo.close();
+                    engine = await MarpVideoEngine.createMarpVideoEngine(document.getElementById('canvas'), options);
+                    window.marpVideo = engine;
+                    report(target, 'pass', `${label}: engine loaded`, `${engine.videoWidth}x${engine.videoHeight} @ ${engine.fps}fps, ${engine.duration.toFixed(1)}s`);
+                } catch (err) {
+                    report(target, 'fail', `${label}: engine load`, String(err),
+                        'If this mentions moov, the file may be unusual; if it mentions fetch or CORS, see the network rows above.');
+                    return;
+                }
+
+                const settle = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+                const start = Math.min(2, engine.duration / 4);
+                engine.currentTime = start;
+                await settle(2500);
+
+                // Frame stepping is checked FIRST, while the engine is
+                // quiescent. Done after playback instead, it inherits
+                // whatever state a rate change and pause left behind, which
+                // made this read positions playback was still moving.
+                //
+                // Nudged by 1.5 frames, not 1: fps is rounded, so on a stream
+                // whose real rate is just under the integer (24.9 reported as
+                // 25) a 1/fps nudge lands inside the CURRENT frame's own span
+                // and snaps back to it. Measured: +1/fps moved nothing,
+                // +1.5/fps advanced exactly one frame.
+                const beforeStep = engine.currentTime;
+                engine.currentTime = beforeStep + 1.5 / engine.fps;
+                await settle(1500);
+                const afterStep = engine.currentTime;
+                const advanced = afterStep - beforeStep;
+                const oneFrameish = advanced > 0 && advanced < 2.5 / engine.fps;
+                report(target, oneFrameish ? 'pass' : 'fail', `${label}: frame step`,
+                    `${beforeStep.toFixed(3)}s → ${afterStep.toFixed(3)}s (+${advanced.toFixed(3)}s, nominal frame ${(1 / engine.fps).toFixed(3)}s)`,
+                    oneFrameish ? null : 'Stepping did not land on the neighbouring frame.');
+
+                const playFrom = engine.currentTime;
+                engine.play();
+                await settle(4000);
+                const forward = engine.currentTime;
+                report(target, forward > playFrom ? 'pass' : 'fail', `${label}: forward playback`, `${playFrom.toFixed(2)}s → ${forward.toFixed(2)}s`,
+                    forward > playFrom ? null : 'Playback did not advance — usually decode cannot keep up, or units are not arriving.');
+
+                engine.playbackRate = -1;
+                engine.play();
+                await settle(4000);
+                const reverse = engine.currentTime;
+                report(target, reverse < forward ? 'pass' : 'fail', `${label}: reverse playback`, `${forward.toFixed(2)}s → ${reverse.toFixed(2)}s`,
+                    reverse < forward ? null : 'Reverse did not move.');
+
+                engine.playbackRate = 1;
+                engine.pause();
+                await settle(600);
+            }
+
+            // --- 4. Local file ---------------------------------------------------
+            async function useFile(file) {
+                report('localResults', 'pass', 'file received', `${file.name}, ${(file.size / 1024 / 1024).toFixed(1)} MB, type "${file.type || 'unknown'}"`);
+                if (!bundleLoaded) {
+                    report('localResults', 'fail', 'local file', 'cannot play: the engine bundle did not load (see above)');
+                    return;
+                }
+                await exercise('localResults', 'local file', {
+                    mediaSource: new MarpVideoEngine.LocalFileMediaSource({ file, onError: (e) => report('localResults', 'warn', 'source error', e.message) }),
+                });
+            }
+
+            document.getElementById('file').addEventListener('change', (event) => {
+                if (event.target.files[0]) useFile(event.target.files[0]);
+            });
+            const drop = document.getElementById('drop');
+            drop.addEventListener('dragover', (e) => e.preventDefault());
+            drop.addEventListener('drop', (e) => {
+                e.preventDefault();
+                const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+                if (file) useFile(file);
+                else report('localResults', 'fail', 'drag-and-drop', 'drop produced no file',
+                    'WebView2 needs CoreWebView2Controller.AllowExternalDrop = true (it is the default, but hosts sometimes turn it off).');
+            });
+
+            // --- 5/6. Jellyfin ----------------------------------------------------
+            document.getElementById('runJellyfin').addEventListener('click', async () => {
+                if (!bundleLoaded) {
+                    report('jellyfinResults', 'fail', 'jellyfin checks', 'cannot run: the engine bundle did not load (see above)');
+                    return;
+                }
+                const server = document.getElementById('server').value.trim();
+                const itemId = document.getElementById('item').value.trim();
+                if (!server || !itemId) {
+                    report('jellyfinResults', 'fail', 'jellyfin inputs', 'server URL and item id are required');
+                    return;
+                }
+
+                if (location.protocol === 'https:' && server.startsWith('http:')) {
+                    // A warning, not a failure: the host may already permit this
+                    // via --allow-running-insecure-content, and only an actual
+                    // request can tell. The login and playback rows below are
+                    // the real verdict.
+                    report('jellyfinResults', 'warn', 'mixed content risk', `page is https, server is http (${server})`,
+                        'Normally blocked. If the rows below pass, this host allows it (WebView2 started with --allow-running-insecure-content). ' +
+                            'If they fail with network errors, add that argument, serve this page from http://127.0.0.1, or put Jellyfin behind https.');
+                }
+
+                const client = new MarpVideoEngine.JellyfinClient();
+                try {
+                    await client.login(server, document.getElementById('user').value.trim(), document.getElementById('pass').value);
+                    report('jellyfinResults', 'pass', 'jellyfin login', `signed in to ${server}`);
+                } catch (err) {
+                    report('jellyfinResults', 'fail', 'jellyfin login', String(err),
+                        'If this is a network/CORS error rather than bad credentials, the host is blocking the request — check mixed content above and any WebView2 request filtering.');
+                    return;
+                }
+
+                await exercise('jellyfinResults', 'Direct Play', {
+                    mediaSource: new MarpVideoEngine.JellyfinDirectPlayMediaSource({
+                        client, itemId, onError: (e) => report('jellyfinResults', 'warn', 'Direct Play source error', e.message),
+                    }),
+                });
+
+                try {
+                    const source = new MarpVideoEngine.JellyfinMediaSource(client);
+                    const options = await source.probeQualityOptions(itemId);
+                    const tier = options.find((o) => !o.directPlay);
+                    if (!tier) {
+                        report('jellyfinResults', 'warn', 'transcode', 'no transcode tier offered for this item');
+                        return;
+                    }
+                    const streamUrl = await source.resolveStreamUrl(itemId, tier);
+                    await exercise('jellyfinResults', `transcode (${tier.name})`, { streamUrl, maxConcurrentFetches: source.maxConcurrentFetches });
+                } catch (err) {
+                    report('jellyfinResults', 'fail', 'transcode', String(err));
+                }
+            });
+
+            document.getElementById('copy').addEventListener('click', async () => {
+                try {
+                    await navigator.clipboard.writeText(lines.join('\n'));
+                } catch {
+                    // Clipboard access is often denied in a host; the text is on screen regardless.
+                }
+            });
+
+            checkDecode().then(checkBlobRange).then(checkSameOriginRange);
+        </script>
+    </body>
+</html>

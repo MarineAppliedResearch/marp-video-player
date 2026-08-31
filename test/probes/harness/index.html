@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <title>S1/S2 decode harness</title>
+        <style>
+            body {
+                font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace;
+                margin: 16px;
+                background: #111;
+                color: #ddd;
+            }
+            label {
+                display: inline-block;
+                margin-right: 12px;
+            }
+            input {
+                font: inherit;
+                background: #000;
+                color: #ddd;
+                border: 1px solid #444;
+                padding: 2px 4px;
+            }
+            button {
+                font: inherit;
+                padding: 4px 12px;
+                margin-right: 8px;
+            }
+            #out {
+                white-space: pre;
+                overflow: auto;
+                height: 70vh;
+                border: 1px solid #333;
+                padding: 8px;
+                margin-top: 12px;
+            }
+            .note {
+                color: #999;
+            }
+        </style>
+    </head>
+    <body>
+        <h3>S1 / S2 decode harness (#36 Phase 0)</h3>
+        <p class="note">
+            Run this on a machine with real GPU decode. S1 measures decode cost, time-to-target-frame by landing position in a GOP, and backward-step re-decode cost. S2 retains frames until
+            VideoFrame allocation fails. Fetch time is excluded from every decode number.
+        </p>
+        <p class="note">S2 may crash the tab instead of throwing. That is the answer, not a bug: the last line printed brackets the ceiling to within 50 frames.</p>
+        <div>
+            <label>server <input id="base" size="26" value="" placeholder="http://host:port" /></label>
+            <label>item <input id="item" size="38" value="fb6a3c0f-bd5e-073d-40e0-840b9a54b79c" /></label>
+        </div>
+        <div style="margin-top: 6px">
+            <label>user <input id="user" size="10" value="" placeholder="username" /></label>
+            <label>pass <input id="pass" type="password" size="26" value="" /></label>
+            <label>S2 frame cap <input id="cap" size="6" value="4000" /></label>
+        </div>
+        <div style="margin-top: 10px">
+            <button id="s1">Run S1</button>
+            <button id="s2">Run S2</button>
+            <button id="clear">Clear</button>
+        </div>
+        <div id="out"></div>
+        <!--
+            The harness and the probe helpers import mp4box as a bare
+            specifier, the same way src/ does, so the code is identical whether
+            it runs in Node or here. Browsers cannot resolve bare specifiers,
+            so this import map points it at the installed package. serve.mjs is
+            rooted at the repository root, which is what makes /node_modules
+            reachable.
+        -->
+        <script type="importmap">
+        {
+            "imports": {
+                "mp4box": "/node_modules/mp4box/dist/mp4box.all.mjs"
+            }
+        }
+        </script>
+        <script type="module" src="./harness.js"></script>
+    </body>
+</html>

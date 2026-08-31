@@ -1,0 +1,13 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+docs/generated/
+.env
+.env.*
+!.env.example
+*.log
+Thumbs.db
+.DS_Store
+app/dist/
+app/dev-config.js
