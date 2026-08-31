@@ -1,4 +1,7 @@
 {
+  // Five actions, matching the five things anyone actually does here. All of
+  // them run under the debugger, so breakpoints work without a separate
+  // "debug" variant of each entry.
   "version": "0.2.0",
   "configurations": [
     {
@@ -15,7 +18,7 @@
       }
     },
     {
-      "name": "Debug unit tests (all)",
+      "name": "Run unit tests",
       "type": "node",
       "request": "launch",
       "program": "${workspaceFolder}/node_modules/jest/bin/jest.js",
@@ -25,29 +28,32 @@
       "skipFiles": ["<node_internals>/**"]
     },
     {
-      "name": "Debug unit tests (current file)",
+      "name": "Run browser tests",
       "type": "node",
       "request": "launch",
-      "program": "${workspaceFolder}/node_modules/jest/bin/jest.js",
-      "args": ["--runInBand", "--forceExit", "--runTestsByPath", "${relativeFile}"],
+      "program": "${workspaceFolder}/node_modules/@playwright/test/cli.js",
+      "args": ["test"],
       "console": "integratedTerminal",
       "internalConsoleOptions": "neverOpen",
       "skipFiles": ["<node_internals>/**"]
     },
     {
-      "name": "Debug the build",
+      "name": "Build library",
       "type": "node",
       "request": "launch",
       "program": "${workspaceFolder}/build.js",
       "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
       "skipFiles": ["<node_internals>/**"]
     },
     {
-      "name": "Debug a probe (current file)",
+      "name": "Build docs",
       "type": "node",
       "request": "launch",
-      "program": "${file}",
+      "program": "${workspaceFolder}/node_modules/jsdoc/jsdoc.js",
+      "args": ["-c", "jsdoc.config.json", "--lenient"],
       "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
       "skipFiles": ["<node_internals>/**"]
     }
   ]

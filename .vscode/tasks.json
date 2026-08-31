@@ -1,12 +1,31 @@
 {
   "version": "2.0.0",
 
+  // Deliberately small. Building, testing, and serving are in the Run and
+  // Debug launcher; these are only the pieces the launcher depends on, plus
+  // one-time setup. Duplicating everything here made two menus to choose
+  // between for the same actions.
+  //
   // Tasks invoke npm.cmd on Windows rather than the "npm" task type. VS Code
   // runs tasks through PowerShell, which resolves bare `npm` to npm.ps1 and
   // then refuses to load it when the execution policy is Restricted. A .cmd
-  // shim is not affected by execution policy, so this works without asking
-  // every developer to change a machine-wide security setting.
+  // shim is not affected by execution policy.
   "tasks": [
+    {
+      "label": "Build library",
+      "detail": "esbuild: ESM, IIFE, and minified standalone bundles into dist/.",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "build"],
+      "windows": {
+        "command": "npm.cmd"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
     {
       "label": "Serve player",
       "detail": "Static server on port 8099, serving the player at /app/index.html.",
@@ -37,73 +56,21 @@
       }
     },
     {
-      "label": "Build library",
-      "detail": "esbuild: ESM, IIFE, and minified standalone bundles into dist/.",
-      "type": "shell",
-      "command": "npm",
-      "args": ["run", "build"],
-      "windows": {
-        "command": "npm.cmd"
-      },
-      "group": {
-        "kind": "build",
-        "isDefault": true
-      },
-      "problemMatcher": []
-    },
-    {
-      "label": "Build docs",
-      "detail": "JSDoc + docdash into docs/generated/.",
-      "type": "shell",
-      "command": "npm",
-      "args": ["run", "docs"],
-      "windows": {
-        "command": "npm.cmd"
-      },
-      "problemMatcher": []
-    },
-    {
-      "label": "Run unit tests",
-      "detail": "Jest. 12 suites, no browser or network needed.",
-      "type": "shell",
-      "command": "npm",
-      "args": ["run", "test:unit"],
-      "windows": {
-        "command": "npm.cmd"
-      },
-      "group": {
-        "kind": "test",
-        "isDefault": true
-      },
-      "problemMatcher": []
-    },
-    {
-      "label": "Run E2E tests",
-      "detail": "Playwright against a real browser. Start 'Serve player' first, or set MARP_PLAYER_TEST_URL.",
-      "type": "shell",
-      "command": "npm",
-      "args": ["run", "test:e2e"],
-      "windows": {
-        "command": "npm.cmd"
-      },
+      "label": "Build library and serve",
+      "detail": "Used by the 'Open player in browser' launcher entry.",
+      "dependsOrder": "sequence",
+      "dependsOn": ["Build library", "Serve player"],
       "problemMatcher": []
     },
     {
       "label": "Install Playwright browsers",
-      "detail": "One-time setup before E2E tests can run.",
+      "detail": "One-time setup on a new machine, before the browser tests can run.",
       "type": "shell",
       "command": "npx",
       "args": ["playwright", "install", "chromium"],
       "windows": {
         "command": "npx.cmd"
       },
-      "problemMatcher": []
-    },
-    {
-      "label": "Build library and serve",
-      "detail": "Rebuild the bundles, then start the server. Used by the F5 browser configurations.",
-      "dependsOrder": "sequence",
-      "dependsOn": ["Build library", "Serve player"],
       "problemMatcher": []
     }
   ]

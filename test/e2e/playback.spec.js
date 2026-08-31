@@ -33,19 +33,26 @@
  * @module video-engine/test/e2e/playback.spec
  */
 
-const { existsSync } = require('node:fs');
-const { test, expect } = require('@playwright/test');
+import { existsSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { test, expect } from '@playwright/test';
+
+/** This file's directory. ESM has no __dirname. */
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 /** Real segment fetch time against the live Jellyfin server over a slow connection has been observed taking 30s+ for a single segment. */
 const ENGINE_LOAD_TIMEOUT_MS = 90_000;
 
 /**
- * A real 1080p MP4 on disk. Any MP4 works; set VIDEO_ENGINE_TEST_LOCAL_FILE to
- * point at your own footage. Set from the environment only, with no default:
- * the previous hardcoded path was absolute and Linux-only, which reported a
- * misleading missing-fixture path on Windows. Suites needing it skip when unset.
+ * A real 1080p MP4 on disk.
+ *
+ * Defaults to the fixture the global setup downloads into .test-media/, so this
+ * suite needs no manual preparation. Set MARP_LOCAL_FIXTURE to point at your
+ * own footage instead.
  */
-const LOCAL_FIXTURE = process.env.VIDEO_ENGINE_TEST_LOCAL_FILE || '';
+const LOCAL_FIXTURE = process.env.MARP_LOCAL_FIXTURE
+    || join(HERE, '..', '..', '.test-media', 'short-1080p25.mp4');
 
 /**
  * Reads the current window.marpVideo playback state from the page.
@@ -113,8 +120,10 @@ const SOURCES = [
     {
         name: 'local file',
         needsJellyfin: false,
-        skip: (!LOCAL_FIXTURE && 'set VIDEO_ENGINE_TEST_LOCAL_FILE to an MP4 on disk to run this suite')
-            || (!existsSync(LOCAL_FIXTURE) && `local fixture not found: ${LOCAL_FIXTURE}`),
+        // The global setup downloads this, so a missing file means setup did
+        // not run or failed -- a real problem, not a reason to quietly skip.
+        skip: !existsSync(LOCAL_FIXTURE)
+            && `fixture missing: ${LOCAL_FIXTURE}. The global setup should have downloaded it.`,
         load: async (page) => {
             await page.click('#playerSettingsButton');
             await page.click('[data-section="settingsLoadItemBody"]');
