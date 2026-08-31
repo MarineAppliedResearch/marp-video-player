@@ -1,25 +1,34 @@
 {
   "version": "2.0.0",
+
+  // Tasks invoke npm.cmd on Windows rather than the "npm" task type. VS Code
+  // runs tasks through PowerShell, which resolves bare `npm` to npm.ps1 and
+  // then refuses to load it when the execution policy is Restricted. A .cmd
+  // shim is not affected by execution policy, so this works without asking
+  // every developer to change a machine-wide security setting.
   "tasks": [
     {
       "label": "Serve player (harness)",
-      "detail": "Static server on port 8099. Player page at /app/index.html, probe harness at /test/probes/harness/.",
-      "type": "npm",
-      "script": "harness",
+      "detail": "Static server on port 8099. Player at /app/index.html, probe harness at /test/probes/harness/.",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "harness"],
+      "windows": {
+        "command": "npm.cmd"
+      },
       "isBackground": true,
       "problemMatcher": {
+        "owner": "marp-harness",
         "pattern": [
           {
-            "regexp": "^$",
-            "file": 1,
-            "location": 2,
-            "message": 3
+            "regexp": "^(.*)$",
+            "message": 1
           }
         ],
         "background": {
           "activeOnStart": true,
-          "beginsPattern": ".*",
-          "endsPattern": "harness at http://localhost.*"
+          "beginsPattern": "^.*$",
+          "endsPattern": "harness at http://localhost"
         }
       },
       "presentation": {
@@ -30,8 +39,12 @@
     {
       "label": "Build library",
       "detail": "esbuild: ESM, IIFE, and minified standalone bundles into dist/.",
-      "type": "npm",
-      "script": "build",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "build"],
+      "windows": {
+        "command": "npm.cmd"
+      },
       "group": {
         "kind": "build",
         "isDefault": true
@@ -41,15 +54,23 @@
     {
       "label": "Build docs",
       "detail": "JSDoc + docdash into docs/generated/.",
-      "type": "npm",
-      "script": "docs",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "docs"],
+      "windows": {
+        "command": "npm.cmd"
+      },
       "problemMatcher": []
     },
     {
       "label": "Run unit tests",
       "detail": "Jest. 12 suites, no browser or network needed.",
-      "type": "npm",
-      "script": "test:unit",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "test:unit"],
+      "windows": {
+        "command": "npm.cmd"
+      },
       "group": {
         "kind": "test",
         "isDefault": true
@@ -59,20 +80,28 @@
     {
       "label": "Run E2E tests",
       "detail": "Playwright against a real browser. Start 'Serve player (harness)' first, or set MARP_PLAYER_TEST_URL.",
-      "type": "npm",
-      "script": "test:e2e",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "test:e2e"],
+      "windows": {
+        "command": "npm.cmd"
+      },
       "problemMatcher": []
     },
     {
       "label": "Install Playwright browsers",
       "detail": "One-time setup before E2E tests can run.",
       "type": "shell",
-      "command": "npx playwright install chromium",
+      "command": "npx",
+      "args": ["playwright", "install", "chromium"],
+      "windows": {
+        "command": "npx.cmd"
+      },
       "problemMatcher": []
     },
     {
       "label": "Build library and serve",
-      "detail": "Rebuild the bundles, then start the server. Use this after changing src/.",
+      "detail": "Rebuild the bundles, then start the server. Used by the F5 browser configurations.",
       "dependsOrder": "sequence",
       "dependsOn": ["Build library", "Serve player (harness)"],
       "problemMatcher": []
