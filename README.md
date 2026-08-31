@@ -121,13 +121,15 @@ Open the folder and use **Run and Debug** (<kbd>F5</kbd>):
 
 | Configuration | What it does |
 | --- | --- |
-| Open player in browser | Rebuilds, starts the server, opens the player with the debugger attached |
-| Debug unit tests (all) | Full Jest suite with breakpoints |
-| Debug unit tests (current file) | Just the open test file |
-| Debug the build | Step through `build.js` |
-| Debug a probe (current file) | Run the open probe under the debugger |
+| Open player in browser | Rebuilds, starts the server, opens the player for manual testing |
+| Run unit tests | 140 tests, no dependencies |
+| Run browser tests | 26 tests in a real browser |
+| Build library | The three bundles into `dist/` |
+| Build docs | JSDoc reference into `docs/generated/` |
 
-Or **Terminal → Run Task** for build, docs, tests, E2E, and serving without a debugger. `Install Playwright browsers` is a one-time task needed before E2E tests work.
+All five run under the debugger, so breakpoints work.
+
+`Install Playwright browsers` is a one-time task under **Terminal → Run Task**, needed on a new machine before the browser tests can run.
 
 ### Tests
 
