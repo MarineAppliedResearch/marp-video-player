@@ -1,0 +1,81 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Serve player (harness)",
+      "detail": "Static server on port 8099. Player page at /app/index.html, probe harness at /test/probes/harness/.",
+      "type": "npm",
+      "script": "harness",
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": [
+          {
+            "regexp": "^$",
+            "file": 1,
+            "location": 2,
+            "message": 3
+          }
+        ],
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*",
+          "endsPattern": "harness at http://localhost.*"
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Build library",
+      "detail": "esbuild: ESM, IIFE, and minified standalone bundles into dist/.",
+      "type": "npm",
+      "script": "build",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Build docs",
+      "detail": "JSDoc + docdash into docs/generated/.",
+      "type": "npm",
+      "script": "docs",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run unit tests",
+      "detail": "Jest. 12 suites, no browser or network needed.",
+      "type": "npm",
+      "script": "test:unit",
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run E2E tests",
+      "detail": "Playwright against a real browser. Start 'Serve player (harness)' first, or set MARP_PLAYER_TEST_URL.",
+      "type": "npm",
+      "script": "test:e2e",
+      "problemMatcher": []
+    },
+    {
+      "label": "Install Playwright browsers",
+      "detail": "One-time setup before E2E tests can run.",
+      "type": "shell",
+      "command": "npx playwright install chromium",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build library and serve",
+      "detail": "Rebuild the bundles, then start the server. Use this after changing src/.",
+      "dependsOrder": "sequence",
+      "dependsOn": ["Build library", "Serve player (harness)"],
+      "problemMatcher": []
+    }
+  ]
+}

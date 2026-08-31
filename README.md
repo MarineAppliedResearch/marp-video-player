@@ -102,12 +102,35 @@ Generate the full reference with `npm run docs`.
 
 ```bash
 npm install
-npm run harness      # standalone player at http://localhost:8099/test/probes/harness/
+npm run build        # ESM, IIFE, and standalone bundles into dist/
+npm run harness      # static server on port 8099
 npm test             # 12 suites, 140 unit tests
-npm run build
+npm run docs         # JSDoc reference into docs/generated/
 ```
 
-The harness is a self-contained page for working on the player with nothing else running — no API, no database. It is the normal way to develop here.
+With the server running:
+
+| URL | What it is |
+| --- | --- |
+| <http://localhost:8099/app/index.html> | the player with its full UI — load a local MP4 or a URL |
+| <http://localhost:8099/test/probes/harness/> | probe harness for Direct Play index work; needs a Jellyfin server |
+
+Everything here runs with nothing else installed — no API, no database, no Jellyfin. Loading a local file exercises the full decode and playback path on its own.
+
+### In VS Code
+
+Open the folder and use **Run and Debug** (<kbd>F5</kbd>):
+
+| Configuration | What it does |
+| --- | --- |
+| Open player in browser | Rebuilds, starts the server, opens the player with the debugger attached |
+| Open probe harness in browser | Same, for the probe harness |
+| Debug unit tests (all) | Full Jest suite with breakpoints |
+| Debug unit tests (current file) | Just the open test file |
+| Debug the build | Step through `build.js` |
+| Debug a probe (current file) | Run the open probe under the debugger |
+
+Or **Terminal → Run Task** for build, docs, tests, E2E, and serving without a debugger. `Install Playwright browsers` is a one-time task needed before E2E tests work.
 
 ### Tests
 
