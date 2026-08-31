@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>MARP Video Player — plain script tag</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 24px;
+            background: #01050d;
+            color: #c9d6e4;
+            font: 15px/1.5 system-ui, sans-serif;
+        }
+        h1 { font-size: 18px; margin: 0 0 4px; color: #64f6f2; }
+        p  { margin: 0 0 18px; color: #7f92a6; }
+        #player { width: 100%; max-width: 960px; aspect-ratio: 16 / 9; }
+        .row { margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+        button {
+            background: #07233a; color: #c9d6e4; border: 1px solid #0e3a5c;
+            border-radius: 6px; padding: 7px 12px; font: inherit; cursor: pointer;
+        }
+        button:hover { border-color: #22d7dc; color: #64f6f2; }
+        code { color: #c7ff62; }
+    </style>
+</head>
+<body>
+    <h1>Plain script tag, no build step</h1>
+    <p>
+        No modules and no bundler. The IIFE build attaches
+        <code>window.MarpVideoEngine</code>. The buttons below drive the player
+        through its public API, which is the same surface a native host uses.
+    </p>
+
+    <div id="player"></div>
+
+    <div class="row">
+        <button id="play">Play</button>
+        <button id="pause">Pause</button>
+        <button id="back">Step back one frame</button>
+        <button id="fwd">Step forward one frame</button>
+        <button id="reverse">Play in reverse</button>
+    </div>
+
+    <script src="../dist/marp-video-player.iife.js"></script>
+    <script>
+        // The global is MarpVideoEngine, not the package name: native hosts
+        // already depend on that name.
+        var player = MarpVideoEngine.createMarpVideoPlayer(
+            document.getElementById('player')
+        );
+
+        document.getElementById('play').onclick = function () { player.play(); };
+        document.getElementById('pause').onclick = function () { player.pause(); };
+
+        // Frame stepping is exact: one frame is 1/fps, and the player lands on
+        // that frame rather than near it.
+        document.getElementById('fwd').onclick = function () {
+            player.currentTime = player.currentTime + 1 / player.fps;
+        };
+        document.getElementById('back').onclick = function () {
+            player.currentTime = Math.max(0, player.currentTime - 1 / player.fps);
+        };
+
+        // A negative rate is real reverse decoding, not repeated seeking.
+        document.getElementById('reverse').onclick = function () {
+            player.playbackRate = -1;
+            player.play();
+        };
+    </script>
+</body>
+</html>
