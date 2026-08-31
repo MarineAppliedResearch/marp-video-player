@@ -1,17 +1,27 @@
+# --- Dependencies and build output ---
+node_modules/
+dist/
+app/dist/
+docs/generated/
 
-!.env.example
+# --- Test artifacts ---
+test-results/
+playwright-report/
+
 # Test media downloaded from Jellyfin by the E2E global setup. Real survey
-# footage: this repository is public, so these must never be committed.
-*.log
-.DS_Store
+# footage, and this repository is public, so it must never be committed.
+.test-media/
+
+# --- Local configuration ---
+# .env.example is committed and must stay committed: it is how a developer
+# configures the test suite. The negation has to come after the .env.* rule,
+# because git applies the last matching pattern.
 .env
 .env.*
-.test-media/
-Thumbs.db
+!.env.example
 app/dev-config.js
-app/dist/
-dist/
-docs/generated/
-node_modules/
-playwright-report/
-test-results/
+
+# --- Noise ---
+*.log
+Thumbs.db
+.DS_Store
