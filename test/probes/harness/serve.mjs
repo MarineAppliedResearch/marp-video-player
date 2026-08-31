@@ -29,7 +29,7 @@ const TYPES = {
     '.mp4': 'video/mp4',
 };
 
-createServer((req, res) => {
+const server = createServer((req, res) => {
     let path = decodeURIComponent(req.url.split('?')[0]);
     if (path.endsWith('/')) path += 'index.html';
     const full = join(ROOT, normalize(path).replace(/^(\.\.[/\\])+/, ''));
@@ -41,6 +41,29 @@ createServer((req, res) => {
     }
     res.writeHead(200, { 'Content-Type': TYPES[extname(full)] || 'application/octet-stream' });
     createReadStream(full).pipe(res);
-}).listen(PORT, () => {
+});
+
+server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        // Almost always a server from an earlier run that was never stopped.
+        // An unhandled 'error' event here prints a stack trace that says
+        // nothing about how to fix it, so say it plainly instead.
+        console.error(`Port ${PORT} is already in use.`);
+        console.error('');
+        console.error('Either something else is on that port, or a previous harness is still running.');
+        console.error(`Open http://localhost:${PORT}/app/index.html to check, or serve on another port:`);
+        console.error('');
+        console.error('    npm run harness -- 8100');
+        console.error('');
+        console.error('To find and stop the process holding it:');
+        console.error(`    Windows:  Get-NetTCPConnection -LocalPort ${PORT} | Stop-Process -Id { $_.OwningProcess } -Force`);
+        console.error(`    macOS/Linux:  lsof -ti :${PORT} | xargs kill`);
+        process.exit(1);
+    }
+    throw err;
+});
+
+server.listen(PORT, () => {
     console.log(`harness at http://localhost:${PORT}/test/probes/harness/`);
+    console.log(`player  at http://localhost:${PORT}/app/index.html`);
 });
