@@ -9,7 +9,7 @@
  * localhost is a secure context, which WebCodecs requires. Opening the HTML
  * over file:// is not a reliable substitute.
  *
- * Usage: npm run harness -- [port]
+ * Usage: npm run serve -- [port]
  *        then open http://localhost:8099/video-engine/test/probes/harness/
  */
 
@@ -19,7 +19,7 @@ import { join, extname, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const PORT = Number(process.argv[2]) || 8099;
-const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+const ROOT = fileURLToPath(new URL('../', import.meta.url));
 
 const TYPES = {
     '.html': 'text/html',
@@ -53,7 +53,7 @@ server.on('error', (err) => {
         console.error('Either something else is on that port, or a previous harness is still running.');
         console.error(`Open http://localhost:${PORT}/app/index.html to check, or serve on another port:`);
         console.error('');
-        console.error('    npm run harness -- 8100');
+        console.error('    npm run serve -- 8100');
         console.error('');
         console.error('To find and stop the process holding it:');
         console.error(`    Windows:  Get-NetTCPConnection -LocalPort ${PORT} | Stop-Process -Id { $_.OwningProcess } -Force`);
@@ -64,6 +64,5 @@ server.on('error', (err) => {
 });
 
 server.listen(PORT, () => {
-    console.log(`harness at http://localhost:${PORT}/test/probes/harness/`);
-    console.log(`player  at http://localhost:${PORT}/app/index.html`);
+    console.log(`player at http://localhost:${PORT}/app/index.html`);
 });

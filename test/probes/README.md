@@ -1,86 +1,55 @@
-# Probes (#36 Phase 0)
+# Probes
 
-Throwaway measurement code for the media-source investigation. **No engine
-module imports anything here**, and nothing here is part of the shipped
-bundle — these exist so the numbers in
-`docs/developer/media-source-architecture.md` can be re-derived instead of
-trusted.
+Scripts that check things the automated suites cannot. **No engine module
+imports anything here**, and nothing here ships in the bundle.
 
-They live in the repo rather than a scratchpad because the scratchpad keeps
-getting wiped, and each of these measurements cost real time to establish.
+These are not part of `npm test`. Each drives a real browser, and most need a
+real Jellyfin server, so they are run deliberately rather than on every commit.
+They exist because the unit and E2E suites verify timing, routing and decode
+success, and none of them can answer "is the right picture on screen" or "did
+the host actually receive the messages it needs".
 
 ## Prerequisites
 
-- `node_modules` installed (`mp4box` and, for the harness driver, `playwright`).
-- Network access to the dev Jellyfin server on **port 8097** — never 8096,
-  that is live production. Override with `JELLYFIN_URL`, `JELLYFIN_ITEM`,
-  `JELLYFIN_USER`, `JELLYFIN_PASS`.
-- Fixtures for `fixture-manifest.mjs` live outside the repo in
-  `/home/mare/test-fixtures/video-engine/fixtures/` (see below).
+- `npm install`, plus `npx playwright install chromium`.
+- A served player. Run `npm run serve` in another terminal.
+- For the Jellyfin probes, a **development** Jellyfin server. Configure with
+  `JELLYFIN_URL`, `JELLYFIN_ITEM`, `JELLYFIN_USER`, `JELLYFIN_PASS`. There are
+  no defaults; the probe exits if they are unset.
+- For local-file probes, an MP4 on disk, passed as an argument or via
+  `VIDEO_ENGINE_TEST_LOCAL_FILE`.
 
 ## What is here
 
-| File | Answers |
-|---|---|
-| `directplay-index.mjs` | The original feasibility proof: can a `moov`-prefix fetch alone yield a full sample table, and can an arbitrary GOP be pulled by byte range and assembled into WebCodecs chunks? |
-| `s3-throughput.mjs` | **S3.** Cold index cost, whole-GOP fetch cost, seek cost as a function of landing position within a GOP, sustained sequential throughput, and what a constrained link implies. |
-| `s4-archive-survey.py` | **S4.** Containers, codecs, resolutions, framerates and `moov` position across the real archive. Runs *on the Jellyfin box*, not here. |
-| `harness/` | **S1 and S2.** Decode cost, time-to-target-frame, backward-step re-decode cost, and the retained-frame ceiling. Browser-only. |
-| `fixture-manifest.mjs` | Describes the local MP4 fixtures and writes `manifest.json` beside them. Its box walk is also the non-faststart detector. |
-| `lib/mp4-index.mjs` | Shared helper: range reader, `moov`-prefix index, GOP list, sub-GOP byte ranges, chunk assembly. Used by S3 and the harness so both measure an identically-built index. |
+| File | Answers | Needs |
+|---|---|---|
+| `frame-correctness.mjs` | Is the picture on the canvas the *right* picture? Compares captures against the source by PSNR. Nothing else in the project verifies content rather than timing. | Jellyfin, `FRAME_REFERENCE_FILE` |
+| `host-messages.mjs` | What does `player.html` actually post to a WebView2 host? Verifies the message contract the C# host depends on. | Jellyfin |
+| `player-page.mjs` | Exercises `player.html` the way a host does, by navigating with parameters. Covers both a Jellyfin item and a plain media URL. | Jellyfin |
+| `behind-sessions.mjs` | Are behind sessions negotiated, and from inside the library? Transcode-path only. Not covered by any suite. | Jellyfin |
+| `playback-reporting.mjs` | Does Jellyfin actually receive playback reports, on both paths? Reads `UserData.PlaybackPositionTicks` back from the server, because a client cannot tell whether its own report landed. | Jellyfin |
+| `local-file-playback.mjs` | Do forward, reverse and frame stepping work on a local file? The one fully deterministic path: same bytes every run, no transcoder, no sessions, no network. | a local MP4 |
+| `fixture-manifest.mjs` | Describes local MP4 fixtures and writes `manifest.json` beside them. Its box walk is also the non-faststart detector. | a fixture directory |
 
 ## Running them
 
 ```bash
-node video-engine/test/probes/directplay-index.mjs
-node video-engine/test/probes/s3-throughput.mjs
-node video-engine/test/probes/fixture-manifest.mjs
+npm run serve                                   # in another terminal
+node test/probes/local-file-playback.mjs path/to/video.mp4
+node test/probes/player-page.mjs
 ```
 
-### S1/S2 harness
+## Retired probes
 
-Needs a real GPU. **Numbers measured in the dev sandbox are invalid** — it has
-software-only SwiftShader decode. Serve it (localhost is a secure context,
-which WebCodecs requires; `file://` is not a reliable substitute):
+The Phase 0 measurement probes were removed once their questions were
+answered and the answers shipped:
 
-```bash
-node video-engine/test/probes/harness/serve.mjs 8099
-# then open http://localhost:8099/video-engine/test/probes/harness/
-```
+| Removed | Question | Where the answer went |
+|---|---|---|
+| `directplay-index.mjs` | Can a `moov`-prefix fetch alone yield a full sample table, and can an arbitrary GOP be pulled by byte range? | Yes — implemented as `src/media-source-mp4-byte-range.js` |
+| `harness/` (S1, S2) | Decode cost per GOP, and the retained-frame ceiling before `VideoFrame` allocation fails | Informed the decoded-frame cache default |
+| `s3-throughput.mjs` | Direct Play throughput and seek latency by GOP landing position | Recorded in the media-source architecture notes |
+| `s4-archive-survey.py` | Containers, codecs, resolutions and `moov` position across the real archive | One-time survey; decided the Direct Play index strategy |
+| `lib/mp4-index.mjs` | Shared index helper used only by S3 and the S1/S2 harness | Removed with them |
 
-The server is rooted at the repo root so the browser can import `mp4box` from
-`node_modules` and reuse `lib/mp4-index.mjs` unchanged.
-
-S2 deliberately allocates until it fails, and **may crash the tab rather than
-throw** — that crash is the result. It logs every 50 retained frames, so the
-last line printed brackets the ceiling.
-
-### S4 archive survey
-
-Runs on the Jellyfin box, read-only:
-
-```bash
-scp video-engine/test/probes/s4-archive-survey.py jellyfin-dev-server:~/
-ssh jellyfin-dev-server 'python3 ~/s4-archive-survey.py /mnt/rov-video-new 3 ~/s4.json'
-ssh jellyfin-dev-server 'python3 ~/s4-archive-survey.py /mnt/rov-video-new census'
-```
-
-Sampled mode ffprobes a few files per top-level project directory. Census mode
-checks `moov` position for *every* file and skips ffprobe entirely — header
-reads only, so it is cheap enough to run exhaustively.
-
-## Fixtures
-
-Generated once from the real 1080p source with ffmpeg, into
-`/home/mare/test-fixtures/video-engine/fixtures/` (outside the repo — they are
-large and are not test inputs the suite depends on yet):
-
-| Fixture | What it is |
-|---|---|
-| `long-gop-faststart.mp4` | 30 s stream-copied from the real source, so real ~190-frame GOPs survive intact. `moov` first. |
-| `long-gop-nonfaststart.mp4` | Identical content, `moov` after `mdat` — the 1.2 % of the archive that looks like this. |
-| `short-gop-faststart.mp4` | 10 s re-encoded at 2 s GOPs, matching the transcode path's granularity for A/B comparison. |
-| `tiny.mp4` | 2 s, 320×240 — a fast fixture for tests that only need a decodable file. |
-
-Regenerate with the commands recorded in the session log, then re-run
-`fixture-manifest.mjs`.
+They are in git history if a measurement ever needs redoing.

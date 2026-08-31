@@ -15,15 +15,6 @@
       }
     },
     {
-      "name": "Open probe harness in browser",
-      "type": "chrome",
-      "request": "launch",
-      "url": "http://localhost:8099/test/probes/harness/",
-      "webRoot": "${workspaceFolder}",
-      "preLaunchTask": "Serve player (harness)",
-      "sourceMaps": true
-    },
-    {
       "name": "Debug unit tests (all)",
       "type": "node",
       "request": "launch",

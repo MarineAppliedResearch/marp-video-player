@@ -21,7 +21,7 @@
   ],
   "scripts": {
     "build": "node build.js",
-    "harness": "node test/probes/harness/serve.mjs",
+    "serve": "node tools/serve.mjs",
     "test": "npm run test:unit",
     "test:unit": "jest --forceExit",
     "test:e2e": "playwright test",

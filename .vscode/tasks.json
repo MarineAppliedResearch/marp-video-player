@@ -8,17 +8,17 @@
   // every developer to change a machine-wide security setting.
   "tasks": [
     {
-      "label": "Serve player (harness)",
-      "detail": "Static server on port 8099. Player at /app/index.html, probe harness at /test/probes/harness/.",
+      "label": "Serve player",
+      "detail": "Static server on port 8099, serving the player at /app/index.html.",
       "type": "shell",
       "command": "npm",
-      "args": ["run", "harness"],
+      "args": ["run", "serve"],
       "windows": {
         "command": "npm.cmd"
       },
       "isBackground": true,
       "problemMatcher": {
-        "owner": "marp-harness",
+        "owner": "marp-serve",
         "pattern": [
           {
             "regexp": "^(.*)$",
@@ -28,7 +28,7 @@
         "background": {
           "activeOnStart": true,
           "beginsPattern": "^.*$",
-          "endsPattern": "harness at http://localhost"
+          "endsPattern": "player at http://localhost"
         }
       },
       "presentation": {
@@ -79,7 +79,7 @@
     },
     {
       "label": "Run E2E tests",
-      "detail": "Playwright against a real browser. Start 'Serve player (harness)' first, or set MARP_PLAYER_TEST_URL.",
+      "detail": "Playwright against a real browser. Start 'Serve player' first, or set MARP_PLAYER_TEST_URL.",
       "type": "shell",
       "command": "npm",
       "args": ["run", "test:e2e"],
@@ -103,7 +103,7 @@
       "label": "Build library and serve",
       "detail": "Rebuild the bundles, then start the server. Used by the F5 browser configurations.",
       "dependsOrder": "sequence",
-      "dependsOn": ["Build library", "Serve player (harness)"],
+      "dependsOn": ["Build library", "Serve player"],
       "problemMatcher": []
     }
   ]

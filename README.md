@@ -103,17 +103,15 @@ Generate the full reference with `npm run docs`.
 ```bash
 npm install
 npm run build        # ESM, IIFE, and standalone bundles into dist/
-npm run harness      # static server on port 8099
+npm run serve        # static server on port 8099
 npm test             # 12 suites, 140 unit tests
 npm run docs         # JSDoc reference into docs/generated/
 ```
 
 With the server running:
 
-| URL | What it is |
-| --- | --- |
-| <http://localhost:8099/app/index.html> | the player with its full UI — load a local MP4 or a URL |
-| <http://localhost:8099/test/probes/harness/> | probe harness for Direct Play index work; needs a Jellyfin server |
+<http://localhost:8099/app/index.html> is the player with its full UI. Load a
+local MP4 or a URL.
 
 Everything here runs with nothing else installed — no API, no database, no Jellyfin. Loading a local file exercises the full decode and playback path on its own.
 
@@ -124,7 +122,6 @@ Open the folder and use **Run and Debug** (<kbd>F5</kbd>):
 | Configuration | What it does |
 | --- | --- |
 | Open player in browser | Rebuilds, starts the server, opens the player with the debugger attached |
-| Open probe harness in browser | Same, for the probe harness |
 | Debug unit tests (all) | Full Jest suite with breakpoints |
 | Debug unit tests (current file) | Just the open test file |
 | Debug the build | Step through `build.js` |
@@ -136,7 +133,7 @@ Or **Terminal → Run Task** for build, docs, tests, E2E, and serving without a 
 
 - `npm test` — unit tests. ES modules transformed on the fly by esbuild.
 - `npm run test:e2e` — Playwright, against a real browser. Set `MARP_PLAYER_TEST_URL` to point at a served player, and the Jellyfin variables to exercise those sources.
-- `test/probes/` — manual investigation scripts, not part of the suite. Each explains what question it answers.
+- `test/probes/` — scripts that check what the suites cannot, such as whether the picture on screen is the *right* picture and whether a WebView2 host receives the messages it needs. Run deliberately, not on every commit. See `test/probes/README.md`.
 
 ## Host integration
 
