@@ -1,13 +1,17 @@
-node_modules/
-dist/
-test-results/
-playwright-report/
-docs/generated/
+
+!.env.example
+# Test media downloaded from Jellyfin by the E2E global setup. Real survey
+# footage: this repository is public, so these must never be committed.
+*.log
+.DS_Store
 .env
 .env.*
-!.env.example
-*.log
+.test-media/
 Thumbs.db
-.DS_Store
-app/dist/
 app/dev-config.js
+app/dist/
+dist/
+docs/generated/
+node_modules/
+playwright-report/
+test-results/
