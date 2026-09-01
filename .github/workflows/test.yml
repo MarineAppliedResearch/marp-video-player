@@ -1,0 +1,56 @@
+# Unit tests on every push and pull request.
+#
+# Only the unit tier runs here. It needs no server, no network and no media, so
+# it works on a clean runner. The browser suite decodes real video against a
+# real Jellyfin server that this runner cannot reach, and takes minutes; it is
+# run deliberately by a developer, not on every push.
+
+name: tests
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Build
+        run: npm run build
+
+      # The package claims no runtime dependencies and no network at load.
+      # Both are load-bearing promises for shipboard and field use, so check
+      # them rather than trusting the claim.
+      - name: Bundles are self-contained
+        run: |
+          if grep -qE "^import .* from ['\"][^./]" dist/marp-video-player.js; then
+            echo "ESM bundle has an external import; it must be self-contained."
+            exit 1
+          fi
+          echo "No external imports."
+
+      # Looks for what would actually fetch at load: a stylesheet import, a web
+      # font, a CDN script, or a remote image. Matching every http:// string
+      # instead would fail on a URL inside a doc comment and on an input
+      # placeholder, which teaches everyone to ignore the check.
+      - name: No remote assets loaded
+        run: |
+          if grep -oiE '(@import[^;]*https?://|fonts\.(googleapis|gstatic)|cdn\.[a-z0-9.-]+|unpkg\.com|jsdelivr\.net|cdnjs\.|src=.?https?://|url\(https?://)' dist/marp-video-player.js; then
+            echo "Bundle loads something remote. The player must come up with no network."
+            exit 1
+          fi
+          echo "No remote assets loaded."
