@@ -3,6 +3,19 @@
 Notable changes to marp-video-player. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0]
+
+### Fixed
+- A host is now told the frame playback paused on. Its clock came only from
+  per-frame messages, which report the frame being displayed, so after a pause
+  it could sit a frame or more behind the picture -- worse at higher speeds.
+  Annotations are recorded against a frame, so this mattered.
+
+### Changed
+- The development server supports byte-range requests, so the player can load a
+  URL source from it. It previously answered a range request with the whole
+  file.
+
 ## [0.3.0]
 
 ### Added
