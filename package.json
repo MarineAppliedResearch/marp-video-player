@@ -1,6 +1,6 @@
 {
   "name": "marp-video-player",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Reusable JavaScript/WebCodecs video player for the MARP platform: frame-accurate playback, reverse playback, and multiple media sources including Jellyfin.",
   "type": "module",
   "main": "./dist/marp-video-player.js",
