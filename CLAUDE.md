@@ -85,9 +85,12 @@ Semver, with one rule: **a major bump means the host contract changed** (the
 parameters). A consumer relies on that to take a minor update without
 re-verifying its host.
 
-`npm version <patch|minor|major>` then `git push --follow-tags`. The tag runs
-CI, which tests, checks the tag against `package.json`, builds, publishes to
-npm, and attaches `marp-video-player-X.Y.Z-host.zip` to the release.
+Publish with `npm run publish:version -- <patch|minor|major>`, or the
+**Publish a new version** launcher entry. It refuses on a dirty tree, off
+`master`, or when `master` differs from the remote. The tag then runs CI, which
+tests, checks the tag against `package.json`, builds, publishes to npm through
+trusted publishing (no token), and attaches
+`marp-video-player-X.Y.Z-host.zip` to the release.
 
 Never build a release locally. `dist/` is git-ignored, so a local build is
 unreproducible and nothing records which one a consumer ended up with.

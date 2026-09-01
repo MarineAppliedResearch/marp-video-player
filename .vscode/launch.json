@@ -47,6 +47,16 @@
       "skipFiles": ["<node_internals>/**"]
     },
     {
+      "name": "Publish a new version",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/tools/publish.mjs",
+      "args": ["${input:releaseKind}"],
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
       "name": "Build docs",
       "type": "node",
       "request": "launch",
@@ -55,6 +65,22 @@
       "console": "integratedTerminal",
       "internalConsoleOptions": "neverOpen",
       "skipFiles": ["<node_internals>/**"]
+    }
+    ],
+
+  // Asked when "Publish a new version" starts. A version number can never be
+  // reused once published, so the choice is made deliberately rather than
+  // defaulted.
+  "inputs": [
+    {
+      "id": "releaseKind",
+      "type": "pickString",
+      "description": "What kind of change is this?",
+      "options": [
+        { "label": "patch - a fix, no API change", "value": "patch" },
+        { "label": "minor - new features, still backwards compatible", "value": "minor" },
+        { "label": "major - the host contract changed", "value": "major" }
+      ]
     }
   ]
 }

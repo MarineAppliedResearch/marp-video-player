@@ -254,16 +254,25 @@ Versions follow semver, with one rule that matters to anyone embedding this:
 That is what lets a native host take a minor or patch update without anyone
 opening the host to check.
 
-To release:
+To publish a new version, use **Publish a new version** in the VS Code
+launcher. It asks whether the change is patch, minor or major, then does the
+rest. Or from a terminal:
 
 ```bash
-npm version minor      # bumps package.json and creates the tag
-git push --follow-tags
+npm run publish:version -- patch
 ```
 
-Pushing a `v*` tag runs the release workflow, which tests, verifies the tag
-matches `package.json`, builds, publishes to npm, and attaches the host archive
-to the GitHub release. Nothing is built on anyone's laptop.
+Either way it refuses to run if there are uncommitted changes, if you are not
+on `master`, or if `master` differs from the remote — a published version
+number can never be reused, so it is worth failing before rather than after.
+
+Pushing the tag runs the release workflow: tests, a check that the tag matches
+`package.json`, the build, the npm publish, and the GitHub release with the
+host archive attached. Nothing is built on anyone's laptop.
+
+npm publishing uses trusted publishing, so there is no token involved. npm
+verifies the build's identity with GitHub directly, which means nothing to
+leak and nothing to expire.
 
 ## The MARP platform
 

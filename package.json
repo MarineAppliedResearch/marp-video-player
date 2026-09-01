@@ -26,7 +26,8 @@
     "test": "npm run test:unit",
     "test:unit": "jest --forceExit",
     "test:e2e": "playwright test",
-    "docs": "jsdoc -c jsdoc.config.json --lenient"
+    "docs": "jsdoc -c jsdoc.config.json --lenient",
+    "publish:version": "node tools/publish.mjs"
   },
   "repository": {
     "type": "git",
