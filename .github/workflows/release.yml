@@ -36,8 +36,10 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       # Trusted publishing needs npm 11.5.1 or newer, and Node 22 ships 10.9.
+      # Pinned to 11.x rather than latest: npm 12 requires Node 22.22.2, one
+      # patch above the version pinned in .nvmrc.
       - name: Update npm
-        run: npm install -g npm@latest
+        run: npm install -g npm@^11.5.1
 
       - run: npm ci
 
