@@ -146,7 +146,18 @@ export function attachWebView2Bridge(marpVideo, options = {}) {
     });
 
     marpVideo.addEventListener('playing', () => postStatus('playing'));
-    marpVideo.addEventListener('pause', () => postStatus('pause'));
+
+    // Carries the settled time, the way seeked does.
+    //
+    // Without it a host's clock keeps whatever the last frame| line said, and
+    // those come from requestVideoFrameCallback -- which reports the frame
+    // being displayed, so the final one can describe a frame before the one
+    // playback actually stopped on. Measured at a full frame behind: the
+    // player held 4.960000 (frame 124) while the host still believed 4.920000
+    // (frame 123), with nothing to correct it.
+    //
+    // That matters because annotations are recorded against a frame.
+    marpVideo.addEventListener('pause', () => postStatus(`pause currentTime=${marpVideo.currentTime.toFixed(6)}`));
     marpVideo.addEventListener('seeking', () => postStatus(`seeking currentTime=${marpVideo.currentTime.toFixed(6)}`));
     marpVideo.addEventListener('seeked', () => postStatus(`seeked currentTime=${marpVideo.currentTime.toFixed(6)}`));
 

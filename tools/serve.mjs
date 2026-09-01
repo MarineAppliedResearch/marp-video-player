@@ -39,7 +39,38 @@ const server = createServer((req, res) => {
         res.writeHead(404).end('not found');
         return;
     }
-    res.writeHead(200, { 'Content-Type': TYPES[extname(full)] || 'application/octet-stream' });
+    const type = TYPES[extname(full)] || 'application/octet-stream';
+    const { size } = statSync(full);
+
+    // Range support, because the player reads MP4 by byte range. Without it a
+    // page loaded from here cannot play a URL source at all: the request comes
+    // back 200 with the whole file, and the player has no way to fetch just the
+    // moov prefix or a single GOP.
+    const range = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range || '');
+    if (range) {
+        const start = Number(range[1]);
+        const end = range[2] ? Number(range[2]) : size - 1;
+
+        if (start >= size || end >= size || start > end) {
+            res.writeHead(416, { 'Content-Range': `bytes */${size}` }).end();
+            return;
+        }
+
+        res.writeHead(206, {
+            'Content-Type': type,
+            'Content-Range': `bytes ${start}-${end}/${size}`,
+            'Accept-Ranges': 'bytes',
+            'Content-Length': end - start + 1,
+        });
+        createReadStream(full, { start, end }).pipe(res);
+        return;
+    }
+
+    res.writeHead(200, {
+        'Content-Type': type,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': size,
+    });
     createReadStream(full).pipe(res);
 });
 
