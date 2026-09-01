@@ -29,7 +29,7 @@
 
 import esbuild from 'esbuild';
 import path from 'node:path';
-import { mkdirSync, copyFileSync } from 'node:fs';
+import { mkdirSync, copyFileSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -45,6 +45,15 @@ const entry = path.join(here, 'src', 'index.js');
  */
 const GLOBAL_NAME = 'MarpVideoEngine';
 
+/**
+ * Compiled into the bundle so the running player can report its own version.
+ * Taken from package.json, which the release workflow checks against the tag,
+ * so what the player reports is what was published.
+ */
+const version = JSON.parse(
+    readFileSync(path.join(here, 'package.json'), 'utf8')
+).version;
+
 /** Shared across every output. */
 const common = {
     entryPoints: [entry],
@@ -52,6 +61,9 @@ const common = {
     target: ['chrome94'],
     sourcemap: true,
     logLevel: 'info',
+    define: {
+        __MARP_VERSION__: JSON.stringify(version),
+    },
 };
 
 /**

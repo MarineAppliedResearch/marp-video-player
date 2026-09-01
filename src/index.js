@@ -33,6 +33,19 @@ import { getQualityOptions } from './quality-options.js';
 import { PLAYER_CSS } from './ui/styles.js';
 import { encodeSegmentStates, encodeSegmentGeometry, SEGMENT_FETCHED, SEGMENT_DECODED, SEGMENT_PINNED } from './segment-encoding.js';
 
+/**
+ * This build's version, matching the published package version.
+ *
+ * Replaced at build time by build.js. Outside a build -- running the source
+ * directly, or under the unit tests -- there is no version to report, so it
+ * reads "dev". `typeof` rather than a bare reference, because the identifier
+ * genuinely does not exist then.
+ *
+ * @constant
+ * @type {string}
+ */
+export const VERSION = typeof __MARP_VERSION__ === 'undefined' ? 'dev' : __MARP_VERSION__;
+
 export {
     createMarpVideoPlayer,
     MarpVideoPlayer,

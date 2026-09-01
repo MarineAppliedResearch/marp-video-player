@@ -2,7 +2,7 @@
 <html lang="en">
     <head>
         <meta charset="utf-8" />
-        <title>MARP player</title>
+        <title>marp-video-player</title>
         <style>
             /* The player fills the window; it brings its own styling. */
             html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
@@ -60,6 +60,14 @@
              */
             (function () {
                 const params = new URLSearchParams(window.location.search);
+
+                // The version is compiled into the bundle, so the title always
+                // names the build actually loaded. A host embedding this page
+                // can read it back with document.title, which makes "which
+                // player is this?" answerable without digging through files.
+                if (window.MarpVideoEngine && MarpVideoEngine.VERSION) {
+                    document.title = 'marp-video-player: ' + MarpVideoEngine.VERSION;
+                }
 
                 /** Posts a line to the host in the same status| channel the bridge uses. */
                 function postStatus(text) {

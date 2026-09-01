@@ -3,6 +3,14 @@
 Notable changes to marp-video-player. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0]
+
+### Added
+- `VERSION` export reporting the build's own version, compiled in at build
+  time.
+- `player.html` puts that version in the page title, so a host can read
+  `document.title` to see exactly which player is loaded.
+
 ## [0.2.1]
 
 ### Changed

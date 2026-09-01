@@ -190,6 +190,11 @@ Twenty named exports. The main entry points:
 - `createMarpVideoEngine(canvas, options)` — engine only, given a `mediaSource`
 - `attachWebView2Bridge(...)` — message bridge for native hosts
 - `PLAYER_CSS` — the stylesheet, if you render the markup yourself
+- `VERSION` — this build's version, compiled in
+
+`app/player.html` puts `VERSION` in the page title as
+`marp-video-player: 0.3.0`, so a native host can read `document.title` and know
+exactly which build it loaded.
 
 Generate the full reference with `npm run docs`.
 
