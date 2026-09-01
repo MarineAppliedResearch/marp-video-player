@@ -3,7 +3,7 @@
 Notable changes to marp-video-player. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.4.0]
+## [0.3.1]
 
 ### Fixed
 - A host is now told the frame playback paused on. Its clock came only from
