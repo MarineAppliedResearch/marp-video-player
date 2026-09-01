@@ -26,11 +26,6 @@ jobs:
   release:
     runs-on: ubuntu-latest
 
-    # The secrets context cannot be used in an `if:` expression, so the token
-    # is surfaced here and the conditions below test the env context instead.
-    env:
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-
     steps:
       - uses: actions/checkout@v4
 
@@ -39,6 +34,10 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
           registry-url: 'https://registry.npmjs.org'
+
+      # Trusted publishing needs npm 11.5.1 or newer, and Node 22 ships 10.9.
+      - name: Update npm
+        run: npm install -g npm@latest
 
       - run: npm ci
 
@@ -63,24 +62,12 @@ jobs:
       - name: Pack the host archive
         run: npm run pack:host
 
-      # Skipped rather than failed when the token is absent, so the host
-      # archive can still be released before npm publishing is set up. The
-      # summary says which happened, so a silently unpublished release is not
-      # mistaken for a published one.
+      # No token: npm verifies this build's identity with GitHub directly
+      # (OIDC trusted publishing), configured on the package's npm settings
+      # against this repository and this workflow file. Nothing to leak, and
+      # nothing to expire.
       - name: Publish to npm
-        if: ${{ env.NPM_TOKEN != '' }}
-        run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-
-      - name: Note that npm publishing was skipped
-        if: ${{ env.NPM_TOKEN == '' }}
-        run: |
-          echo "### npm publish skipped" >> $GITHUB_STEP_SUMMARY
-          echo "No NPM_TOKEN secret is set, so this release exists only as a" >> $GITHUB_STEP_SUMMARY
-          echo "GitHub release with the host archive attached." >> $GITHUB_STEP_SUMMARY
-          echo "Add NPM_TOKEN in repository settings to publish to npm." >> $GITHUB_STEP_SUMMARY
+        run: npm publish --access public
 
       - name: Create the GitHub release
         uses: softprops/action-gh-release@v2

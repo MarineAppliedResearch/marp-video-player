@@ -3,6 +3,16 @@
 Notable changes to marp-video-player. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.1]
+
+### Changed
+- Releases publish through npm trusted publishing rather than a token, so
+  there is no secret to leak or expire.
+
+## [0.2.0]
+
+First published version.
+
 ## [Unreleased]
 
 ### Added
