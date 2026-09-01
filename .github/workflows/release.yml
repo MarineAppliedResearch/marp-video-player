@@ -58,10 +58,23 @@ jobs:
       - name: Pack the host archive
         run: npm run pack:host
 
+      # Skipped rather than failed when the token is absent, so the host
+      # archive can still be released before npm publishing is set up. The
+      # summary says which happened, so a silently unpublished release is not
+      # mistaken for a published one.
       - name: Publish to npm
+        if: ${{ secrets.NPM_TOKEN != '' }}
         run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Note that npm publishing was skipped
+        if: ${{ secrets.NPM_TOKEN == '' }}
+        run: |
+          echo "### npm publish skipped" >> $GITHUB_STEP_SUMMARY
+          echo "No NPM_TOKEN secret is set, so this release exists only as a" >> $GITHUB_STEP_SUMMARY
+          echo "GitHub release with the host archive attached." >> $GITHUB_STEP_SUMMARY
+          echo "Add NPM_TOKEN in repository settings to publish to npm." >> $GITHUB_STEP_SUMMARY
 
       - name: Create the GitHub release
         uses: softprops/action-gh-release@v2
