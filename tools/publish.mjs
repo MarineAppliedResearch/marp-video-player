@@ -17,7 +17,7 @@
  * @module tools/publish
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -102,15 +102,10 @@ console.log(`Raising the ${kind} number and publishing.\n`);
 
 // npm version writes package.json, commits, and tags.
 //
-// npm.cmd directly rather than through a shell: a shell would split the commit
-// message on its spaces into separate arguments, and PowerShell refuses the
-// npm.ps1 shim under a Restricted execution policy.
-execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', [
-    'version',
-    kind,
-    '-m',
-    'marp-video-player %s',
-], {
+// One shell command string rather than an argument array: on Windows npm is a
+// .cmd shim, which cannot be spawned without a shell, and passing the commit
+// message as a separate array element through a shell splits it on its spaces.
+execSync(`npm version ${kind} -m "marp-video-player %s"`, {
     cwd: root,
     stdio: 'inherit',
 });
