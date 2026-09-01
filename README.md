@@ -6,6 +6,7 @@
 </p>
 
 <p align="center">
+  <a href="https://www.npmjs.com/package/marp-video-player"><img alt="npm" src="https://img.shields.io/npm/v/marp-video-player?color=cb3837&logo=npm"></a>
   <img alt="Project status" src="https://img.shields.io/badge/status-internal%20production%20%7C%20active%20development-0b7285">
   <img alt="WebCodecs" src="https://img.shields.io/badge/WebCodecs-decoding-ff6f00">
   <img alt="Runtime dependencies" src="https://img.shields.io/badge/runtime%20dependencies-none-2ea043">
@@ -73,7 +74,7 @@ of seeks.
 
 ## Install
 
-**JavaScript projects** — from npm, pinned or latest:
+**JavaScript projects** — from [npm](https://www.npmjs.com/package/marp-video-player), pinned or latest:
 
 ```bash
 npm install marp-video-player@0.2.0
