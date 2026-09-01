@@ -26,6 +26,11 @@ jobs:
   release:
     runs-on: ubuntu-latest
 
+    # The secrets context cannot be used in an `if:` expression, so the token
+    # is surfaced here and the conditions below test the env context instead.
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -63,13 +68,14 @@ jobs:
       # summary says which happened, so a silently unpublished release is not
       # mistaken for a published one.
       - name: Publish to npm
-        if: ${{ secrets.NPM_TOKEN != '' }}
+        if: ${{ env.NPM_TOKEN != '' }}
         run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+
       - name: Note that npm publishing was skipped
-        if: ${{ secrets.NPM_TOKEN == '' }}
+        if: ${{ env.NPM_TOKEN == '' }}
         run: |
           echo "### npm publish skipped" >> $GITHUB_STEP_SUMMARY
           echo "No NPM_TOKEN secret is set, so this release exists only as a" >> $GITHUB_STEP_SUMMARY
