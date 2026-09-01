@@ -3,6 +3,20 @@
 Notable changes to marp-video-player. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.2]
+
+### Fixed
+- The loading spinner starts when a load starts. It was driven entirely by
+  engine events, and the listeners were attached only after the engine had been
+  built -- so the slow part of a load, which is the negotiating, the first fetch
+  and the first decode, reported nothing at all. A cold load looked like a click
+  that had not registered.
+
+### Changed
+- Loading a video clears the previous one's picture back to the placeholder
+  mark. A spinner over the last frame of the previous video read as "still
+  playing that one".
+
 ## [0.3.1]
 
 ### Fixed

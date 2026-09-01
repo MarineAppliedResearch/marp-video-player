@@ -42,7 +42,7 @@ Two tiers, nothing else. There is deliberately no third category of scripts you 
 | Command | What | Speed |
 | --- | --- | --- |
 | `npm test` | 140 unit tests against fake WebCodecs globals. No server, network, or media. | seconds |
-| `npm run test:e2e` | 26 browser tests, real decoding. Starts its own server, downloads its own media. | minutes |
+| `npm run test:e2e` | 28 browser tests, real decoding. Starts its own server, downloads its own media. | minutes |
 
 **Use `npm test` for feedback.** Do not run the browser suite routinely — it decodes real 1080p video against a live server with 120-second timeouts. Leave it to the person working, via the launcher.
 

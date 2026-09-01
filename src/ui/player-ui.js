@@ -379,6 +379,74 @@ export class MarpVideoPlayer {
         }
         this.engine.close();
         this.engine = null;
+
+        // The picture belonged to that engine. Left up, a spinner over the
+        // last frame of the previous video reads as "still playing that one"
+        // rather than "loading the next one". Cleared only once the engine
+        // that draws it is gone, or its render loop would paint over this.
+        this._clearPicture();
+    }
+
+    /**
+     * Blanks the canvas back to the placeholder mark.
+     *
+     * @private
+     * @returns {void}
+     */
+    _clearPicture() {
+        const context = this.el.canvas.getContext('2d');
+        if (context) {
+            context.clearRect(0, 0, this.el.canvas.width, this.el.canvas.height);
+        }
+        this.el.logo.style.display = '';
+    }
+
+    /**
+     * Marks the start of a load: spinner up, load button out.
+     *
+     * The spinner used to be driven entirely by engine events, which meant it
+     * could not appear until there was an engine to raise them -- and by then
+     * the slow part is over. Negotiating with the server, fetching the `moov`
+     * prefix or the playlist, and the first fetch and decode all happen inside
+     * `createMarpVideoEngine`, so the whole opening stretch reported nothing at
+     * all and a load looked like a click that had not registered. See #9.
+     *
+     * Default colour rather than the `decoding` variant: at this point the wait
+     * is network, which is the blue the scrub bar uses for fetched segments.
+     *
+     * @private
+     * @returns {void}
+     */
+    _beginLoad() {
+        this.el.load.disabled = true;
+        this.el.spinner.classList.remove('decoding');
+        this.el.spinner.classList.remove('marp-hidden');
+
+        // A play button over a spinner offers something that is not there yet.
+        // applyLoadedUiState() puts it back when the load succeeds; after a
+        // failure there is genuinely nothing to press.
+        this.el.centerOverlay.classList.add('marp-hidden');
+    }
+
+    /**
+     * Marks the end of a load, however it ended.
+     *
+     * Hidden here rather than left to the engine's `playing`/`canplay`
+     * handlers, because on a successful load those have already fired: the
+     * engine primes its first frame with a `seek(0)` *before*
+     * `createMarpVideoEngine` resolves, so the block clears before this UI has
+     * attached a single listener. Waiting for an event that is already in the
+     * past would leave the spinner turning forever.
+     *
+     * Anything that blocks after this point still raises `waiting`, which puts
+     * the spinner back.
+     *
+     * @private
+     * @returns {void}
+     */
+    _endLoad() {
+        this.el.load.disabled = false;
+        this.el.spinner.classList.add('marp-hidden');
     }
 
     /**
@@ -441,7 +509,7 @@ export class MarpVideoPlayer {
             return null;
         }
 
-        this.el.load.disabled = true;
+        this._beginLoad();
 
         try {
             // Always re-probe the full tier list, even when reloading for one
@@ -490,7 +558,7 @@ export class MarpVideoPlayer {
             console.error(err);
             return null;
         } finally {
-            this.el.load.disabled = false;
+            this._endLoad();
         }
     }
 
@@ -510,7 +578,7 @@ export class MarpVideoPlayer {
             return null;
         }
 
-        this.el.load.disabled = true;
+        this._beginLoad();
 
         try {
             this.log(`Loading local file ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB) ...`);
@@ -542,7 +610,7 @@ export class MarpVideoPlayer {
             this.log(`ERROR loading local file: ${err.message}`);
             return null;
         } finally {
-            this.el.load.disabled = false;
+            this._endLoad();
         }
     }
 
@@ -564,7 +632,7 @@ export class MarpVideoPlayer {
             return null;
         }
 
-        this.el.load.disabled = true;
+        this._beginLoad();
 
         try {
             const rawSegmentCacheBudgetBytes = this._rawCacheBudgetBytes();
@@ -609,7 +677,7 @@ export class MarpVideoPlayer {
             this.log(`ERROR loading URL: ${err.message}`);
             return null;
         } finally {
-            this.el.load.disabled = false;
+            this._endLoad();
         }
     }
 

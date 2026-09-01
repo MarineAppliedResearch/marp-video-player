@@ -224,7 +224,7 @@ Open the folder and use **Run and Debug** (<kbd>F5</kbd>):
 | --- | --- |
 | Open player in browser | Rebuilds, starts the server, opens the player |
 | Run unit tests | 140 tests, no dependencies |
-| Run browser tests | 26 tests in a real browser |
+| Run browser tests | 28 tests in a real browser |
 | Build library | The three bundles into `dist/` |
 | Build docs | JSDoc reference into `docs/generated/` |
 
