@@ -1,0 +1,101 @@
+# Publish a release when a version tag is pushed.
+#
+#     npm version minor        # bumps package.json and creates the tag
+#     git push --follow-tags
+#
+# One tag produces both distribution channels, from one build:
+#
+#   npm package     for JavaScript consumers, who import and configure in code
+#   host archive    for native hosts, which navigate to player.html by URL
+#
+# Building here rather than on a laptop is the point. dist/ is git-ignored, so
+# without this the only build that exists is whatever someone last ran locally,
+# and "which build is in the GUI?" has no answer.
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: npm ci
+
+      # A tagged release that fails its own tests should not ship.
+      - name: Unit tests
+        run: npm run test:unit
+
+      # The tag and package.json must agree, or an installed version would not
+      # match the tag it claims to come from.
+      - name: Tag matches package version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(node -p "require('./package.json').version")
+          if [ "$TAG" != "$PKG" ]; then
+            echo "Tag v$TAG does not match package.json version $PKG."
+            exit 1
+          fi
+          echo "Releasing $PKG."
+
+      - run: npm run build
+
+      - name: Pack the host archive
+        run: npm run pack:host
+
+      # Skipped rather than failed when the token is absent, so the host
+      # archive can still be released before npm publishing is set up. The
+      # summary says which happened, so a silently unpublished release is not
+      # mistaken for a published one.
+      - name: Publish to npm
+        if: ${{ secrets.NPM_TOKEN != '' }}
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Note that npm publishing was skipped
+        if: ${{ secrets.NPM_TOKEN == '' }}
+        run: |
+          echo "### npm publish skipped" >> $GITHUB_STEP_SUMMARY
+          echo "No NPM_TOKEN secret is set, so this release exists only as a" >> $GITHUB_STEP_SUMMARY
+          echo "GitHub release with the host archive attached." >> $GITHUB_STEP_SUMMARY
+          echo "Add NPM_TOKEN in repository settings to publish to npm." >> $GITHUB_STEP_SUMMARY
+
+      - name: Create the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*-host.zip
+          generate_release_notes: true
+          body: |
+            ## Installing
+
+            **JavaScript projects**
+
+            ```bash
+            npm install marp-video-player@${{ github.ref_name }}
+            ```
+
+            **Native hosts (WebView2 and similar)**
+
+            Download the host archive below and unpack it where the host can
+            reach it. It contains `player.html` and the bundle it loads, paired
+            for this version, plus a `VERSION` file recording which release it
+            came from.
+
+            Navigate the host to `player.html`, passing the media as query
+            parameters. See the README for the full list.

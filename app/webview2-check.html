@@ -50,7 +50,7 @@
         <div><button id="copy">Copy summary</button></div>
         <div id="summary"></div>
 
-        <script src="dist/marp-video-engine.js"></script>
+        <script src="dist/marp-video-player.iife.js"></script>
         <script>
             const lines = [];
 
@@ -97,10 +97,10 @@
             }
 
             if (bundleLoaded) {
-                report('auto', 'pass', 'engine bundle', 'dist/marp-video-engine.js loaded');
+                report('auto', 'pass', 'engine bundle', 'dist/marp-video-player.iife.js loaded');
             } else {
-                report('auto', 'fail', 'engine bundle', 'dist/marp-video-engine.js did NOT load -- window.MarpVideoEngine is undefined',
-                    'Every playback check below will fail until this is fixed. The file must sit at dist/marp-video-engine.js RELATIVE TO THIS PAGE, ' +
+                report('auto', 'fail', 'engine bundle', 'dist/marp-video-player.iife.js did NOT load -- window.MarpVideoEngine is undefined',
+                    'Every playback check below will fail until this is fixed. The file must sit at dist/marp-video-player.iife.js RELATIVE TO THIS PAGE, ' +
                         'and in a C# project a newly added file defaults to "Do not copy" -- set Copy to Output Directory = Copy if newer and check bin\\...\\player\\dist\\.');
             }
 
@@ -154,7 +154,7 @@
             // it does, a File-based one if it does not. Nothing had tested it.
             async function checkSameOriginRange() {
                 try {
-                    const res = await fetch('dist/marp-video-engine.js', { headers: { Range: 'bytes=100-199' } });
+                    const res = await fetch('dist/marp-video-player.iife.js', { headers: { Range: 'bytes=100-199' } });
                     const bytes = new Uint8Array(await res.arrayBuffer());
                     const ok = res.status === 206 && bytes.length === 100;
                     report('auto', ok ? 'pass' : 'fail', 'same-origin Range (this page\'s host)',

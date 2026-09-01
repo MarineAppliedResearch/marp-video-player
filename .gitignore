@@ -25,3 +25,4 @@ app/dev-config.js
 *.log
 Thumbs.db
 .DS_Store
+release/

@@ -82,20 +82,20 @@ async function build() {
         outfile: path.join(outDir, 'marp-video-player.standalone.js'),
     });
 
-    // The pages in app/ and the WebView2 host load the bundle as
-    // `dist/marp-video-engine.js` relative to the page. Keep that exact path
-    // and filename so the host integration and the diagnostic page keep
-    // working unchanged.
+    // The pages in app/ load their bundle from `dist/` relative to
+    // themselves, which is also how player.html sits beside its bundle inside
+    // the released host archive. Copying rather than pointing at ../dist/
+    // keeps that one relative path identical in both places, so the page needs
+    // no edit when it is packaged.
+    //
+    // The developer pages take the unminified IIFE; player.html takes the
+    // standalone build, which is the one that actually ships to hosts.
     mkdirSync(appDistDir, { recursive: true });
-    copyFileSync(
-        path.join(outDir, 'marp-video-player.iife.js'),
-        path.join(appDistDir, 'marp-video-engine.js')
-    );
-    copyFileSync(
-        path.join(outDir, 'marp-video-player.iife.js.map'),
-        path.join(appDistDir, 'marp-video-engine.js.map')
-    );
-    console.log('  app/dist/marp-video-engine.js  (compatibility copy for app pages and the WebView2 host)');
+    for (const name of ['marp-video-player.iife.js', 'marp-video-player.standalone.js']) {
+        copyFileSync(path.join(outDir, name), path.join(appDistDir, name));
+        copyFileSync(path.join(outDir, `${name}.map`), path.join(appDistDir, `${name}.map`));
+    }
+    console.log('  app/dist/  (bundles copied for the pages in app/)');
 }
 
 build().catch((err) => {

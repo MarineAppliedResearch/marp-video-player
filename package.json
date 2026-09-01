@@ -21,6 +21,7 @@
   ],
   "scripts": {
     "build": "node build.js",
+    "pack:host": "node tools/pack-host.mjs",
     "serve": "node tools/serve.mjs",
     "test": "npm run test:unit",
     "test:unit": "jest --forceExit",

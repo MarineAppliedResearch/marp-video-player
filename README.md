@@ -73,11 +73,27 @@ of seeks.
 
 ## Install
 
+**JavaScript projects** — from npm, pinned or latest:
+
 ```bash
-npm install github:MarineAppliedResearch/marp-video-player
+npm install marp-video-player@0.2.0
+npm install marp-video-player@latest
 ```
 
-Or download a build from `dist/` and drop it into your project.
+**Native hosts** — WebView2 and similar navigate to a URL rather than calling
+JavaScript, so they take the host archive from a
+[release](https://github.com/MarineAppliedResearch/marp-video-player/releases):
+
+```text
+marp-video-player-0.2.0-host.zip
+├── player.html      point the host at this, media as query parameters
+├── dist/            the bundle the page loads
+└── VERSION          which release this is
+```
+
+The page and its bundle are paired in the archive deliberately: the page loads
+the bundle by relative path, so shipping them separately eventually pairs a new
+page with an old bundle, and the failure is silent.
 
 ## Use it
 
@@ -148,7 +164,7 @@ Both matter because this runs on ships and at field sites, where connectivity is
 | --- | --- | --- |
 | `dist/marp-video-player.js` | ESM | `import` in a browser or bundler |
 | `dist/marp-video-player.iife.js` | IIFE, `window.MarpVideoEngine` | plain `<script>` |
-| `dist/marp-video-player.standalone.js` | IIFE, minified | native hosts and embedded use |
+| `dist/marp-video-player.standalone.js` | IIFE, minified | native hosts; this is what ships in the host archive |
 
 The IIFE global is `MarpVideoEngine` rather than the package name, because the C# WebView2 host and the pages in `app/` depend on that name.
 
@@ -226,6 +242,27 @@ The player runs inside a C# WebView2 host in MARE's desktop application. `app/pl
 Changing the bridge protocol, the `MarpVideoEngine` global name, or `player.html`'s query parameters is a breaking change for software in a different repository. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
+
+## Releasing
+
+Versions follow semver, with one rule that matters to anyone embedding this:
+
+> **A major bump means the host contract changed** — the `MarpVideoEngine`
+> global, the `postMessage` protocol, or `player.html`'s query parameters.
+
+That is what lets a native host take a minor or patch update without anyone
+opening the host to check.
+
+To release:
+
+```bash
+npm version minor      # bumps package.json and creates the tag
+git push --follow-tags
+```
+
+Pushing a `v*` tag runs the release workflow, which tests, verifies the tag
+matches `package.json`, builds, publishes to npm, and attaches the host archive
+to the GitHub release. Nothing is built on anyone's laptop.
 
 ## The MARP platform
 
