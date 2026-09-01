@@ -101,10 +101,18 @@ console.log(`Current version: ${current}`);
 console.log(`Raising the ${kind} number and publishing.\n`);
 
 // npm version writes package.json, commits, and tags.
-execFileSync('npm', ['version', kind, '-m', 'marp-video-player %s'], {
+//
+// npm.cmd directly rather than through a shell: a shell would split the commit
+// message on its spaces into separate arguments, and PowerShell refuses the
+// npm.ps1 shim under a Restricted execution policy.
+execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', [
+    'version',
+    kind,
+    '-m',
+    'marp-video-player %s',
+], {
     cwd: root,
     stdio: 'inherit',
-    shell: process.platform === 'win32',
 });
 
 const next = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).version;
