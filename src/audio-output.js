@@ -59,18 +59,36 @@ const SCHEDULE_INTERVAL_MS = 200;
 const LOOKAHEAD_SECONDS = 0.5;
 
 /**
- * How far audio may drift from the video position before it is resynced,
- * in seconds.
+ * How far audio may drift from the video position before the mapping is
+ * quietly corrected, in seconds.
  *
- * One frame at 25fps is 40ms, and published lip-sync tolerance is tighter for
- * audio leading the picture than lagging it. 50ms sits just past a frame,
- * which keeps corrections rare -- each one is an audible discontinuity, so
- * correcting too eagerly is its own defect.
+ * One frame at 25fps is 40ms, so 50ms is just past a frame.
  *
  * @constant
  * @type {number}
  */
 const DRIFT_LIMIT_SECONDS = 0.05;
+
+/**
+ * How far audio must be out before it is worth cutting the sound to fix it,
+ * in seconds.
+ *
+ * There are two ways to correct drift and they cost different things. Moving
+ * the mapping alone is silent: what is already scheduled plays on, and only
+ * the next unit lands at a corrected time. Cancelling and rescheduling is
+ * exact, and is a click.
+ *
+ * That distinction matters because the render loop re-anchors its own wall
+ * clock every time a frame is late, which on 1080p GOPs under decode load
+ * happens repeatedly -- so audio was being cut two or three times a minute to
+ * correct errors of 50 to 90ms that nobody could have heard. Published
+ * lip-sync tolerance is around 45ms of audio lead and rather more of lag, so
+ * 150ms is the point where the desync is worse than the interruption.
+ *
+ * @constant
+ * @type {number}
+ */
+const DRIFT_RESTART_SECONDS = 0.15;
 
 /** Gain ramp for volume and mute changes, in seconds. Long enough that a change is not a click, short enough to feel instant. */
 const GAIN_RAMP_SECONDS = 0.015;
@@ -410,10 +428,13 @@ export class AudioOutput {
      * moved without audio being told, because that shows up here as the same
      * thing: the playhead is not where the schedule says.
      *
-     * It re-anchors rather than restarting: `start()` would tear down and
-     * rebuild the timer from inside its own callback, and there is nothing to
-     * rebuild. The pass continues immediately afterwards on the new mapping,
-     * so the correction costs one discontinuity and no silence.
+     * Correction comes in two strengths, because they cost different things --
+     * see DRIFT_RESTART_SECONDS. A small error moves the mapping and leaves the
+     * sound alone; only a large one is worth cutting.
+     *
+     * Neither restarts through `start()`, which would tear down and rebuild the
+     * timer from inside its own callback. The pass continues immediately
+     * afterwards on the new mapping.
      *
      * @returns {void}
      */
@@ -430,9 +451,19 @@ export class AudioOutput {
             return;
         }
 
-        this._logDebug(`resyncing audio: ${(error * 1000).toFixed(1)}ms from the picture`);
-        this._cancelScheduled();
-        this._anchorAt(playhead);
+        if (Math.abs(error) >= DRIFT_RESTART_SECONDS) {
+            this._logDebug(`audio is ${(error * 1000).toFixed(0)}ms from the picture; restarting it there`);
+            this._cancelScheduled();
+            this._anchorAt(playhead);
+            return;
+        }
+
+        // Silent correction: the mapping moves, what is already scheduled plays
+        // on to its end, and the next unit is placed on the corrected mapping.
+        // The cursor is deliberately left where it is -- it is a media
+        // position, and the media has not moved.
+        this._baseMediaTime = playhead;
+        this._baseContextTime = this._context.currentTime;
     }
 
     /**

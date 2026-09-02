@@ -306,7 +306,7 @@ describe('AudioOutput drift correction', () => {
      * rates. This is the only drift the design admits, and the only thing
      * that corrects it.
      */
-    it('restarts audio once it has drifted past the limit', () => {
+    it('restarts audio once it has drifted far enough to hear', () => {
         const harness = build();
         harness.output.start(0, 1);
         const before = harness.context.startedSources.length;
@@ -323,6 +323,51 @@ describe('AudioOutput drift correction', () => {
         const latest = sources[sources.length - 1];
         expect(latest.started.when).toBeCloseTo(harness.context.currentTime, 6);
         expect(latest.started.offset).toBeCloseTo(0.8, 6);
+    });
+
+    /**
+     * The render loop re-anchors its own wall clock every time a frame is
+     * late, which on 1080p GOPs under decode load happens repeatedly. Cutting
+     * the sound to correct 90ms each time was audible two or three times a
+     * minute and fixed nothing anyone could hear.
+     */
+    it('corrects a small error without cutting the sound', () => {
+        const harness = build();
+        harness.output.start(0, 1);
+        const [source] = harness.context.startedSources;
+
+        // 90ms out: past the limit, well short of worth interrupting.
+        harness.context.advance(1);
+        harness.setPlayhead(0.91);
+        jest.advanceTimersByTime(200);
+
+        expect(source.stopped).toBe(false);
+        expect(harness.context.startedSources).toHaveLength(1);
+    });
+
+    /**
+     * A silent correction has to actually correct something: the next unit must
+     * land on the moved mapping, or the error simply persists and is re-measured
+     * for ever.
+     */
+    it('places the next unit on the corrected mapping', () => {
+        const harness = build();
+        harness.output.start(0, 1);
+
+        // Correct 100ms silently, then run on to the next unit boundary.
+        harness.context.advance(1);
+        harness.setPlayhead(0.9);
+        jest.advanceTimersByTime(200);
+
+        harness.context.advance(1);
+        harness.setPlayhead(1.9);
+        jest.advanceTimersByTime(200);
+
+        const sources = harness.context.startedSources;
+        expect(sources).toHaveLength(2);
+        // Unit 1 starts at media 2s, which on the corrected mapping is 0.1s
+        // later in context time than it would have been before.
+        expect(sources[1].started.when).toBeCloseTo(2.1, 2);
     });
 
     /**
