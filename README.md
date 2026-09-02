@@ -239,7 +239,7 @@ Requires WebCodecs: **Chrome and Edge 94+**. Firefox and Safari do not yet ship 
 npm install
 npm run build        # ESM, IIFE, and standalone bundles into dist/
 npm run serve        # static server on port 8099
-npm test             # 258 unit tests, no dependencies
+npm test             # 264 unit tests, no dependencies
 npm run docs         # JSDoc reference into docs/generated/
 ```
 
@@ -252,7 +252,7 @@ Open the folder and use **Run and Debug** (<kbd>F5</kbd>):
 | Configuration | What it does |
 | --- | --- |
 | Open player in browser | Rebuilds, starts the server, opens the player |
-| Run unit tests | 258 tests, no dependencies |
+| Run unit tests | 264 tests, no dependencies |
 | Run browser tests | 49 tests in a real browser |
 | Build library | The three bundles into `dist/` |
 | Build docs | JSDoc reference into `docs/generated/` |

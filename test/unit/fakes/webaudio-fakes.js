@@ -135,6 +135,16 @@ class FakeAudioDecoder {
                     sampleRate: 48000,
                 }));
 
+        // Spaced out in time, for testing a decoder that is slow rather than
+        // wedged -- the distinction the progress watchdog exists to make.
+        if (FakeAudioDecoder.slowOutputMs) {
+            for (const chunk of chunks) {
+                await new Promise((resolve) => setTimeout(resolve, FakeAudioDecoder.slowOutputMs));
+                this._output(map(chunk));
+            }
+            return;
+        }
+
         for (const chunk of chunks) {
             this._output(map(chunk));
         }
@@ -378,6 +388,7 @@ function installAudioFakes() {
         global.AudioContext = previous.AudioContext;
         delete FakeAudioDecoder.outputForChunk;
         delete FakeAudioDecoder.simulateStall;
+        delete FakeAudioDecoder.slowOutputMs;
         delete FakeAudioDecoder.simulateError;
         delete FakeAudioDecoder.supported;
         delete FakeAudioContext.initialState;

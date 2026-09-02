@@ -97,6 +97,7 @@ function makeStore(readyUnits) {
 function build({ readyUnits = [0, 1, 2, 3, 4], playhead = 0, unitCount = 5 } = {}) {
     const store = makeStore(readyUnits);
     let currentPlayhead = playhead;
+    let currentPresented = playhead;
     const stateChanges = [];
 
     const output = new AudioOutput({
@@ -111,6 +112,13 @@ function build({ readyUnits = [0, 1, 2, 3, 4], playhead = 0, unitCount = 5 } = {
         store,
         stateChanges,
         setPlayhead: (value) => {
+            currentPlayhead = value;
+            currentPresented = value;
+        },
+        // Moves the intended position only. The presented frame is not read by
+        // the module any more, so this differs from setPlayhead only in what a
+        // test is describing: a window whose render loop has stopped.
+        setPlayheadOnly: (value) => {
             currentPlayhead = value;
         },
         get context() {
@@ -343,6 +351,63 @@ describe('AudioOutput drift correction', () => {
         jest.advanceTimersByTime(200);
 
         expect(harness.context.startedSources).toHaveLength(before);
+    });
+});
+
+describe('AudioOutput when the window is in the background', () => {
+
+    /**
+     * A browser stops  outright for an occluded window,
+     * so the render loop halts and the presented frame stops advancing while
+     * this module's timer and the audio clock carry on.
+     *
+     * Audio must keep playing through that. The render loop is anchored to the
+     * wall clock, so when the window comes back the picture jumps forward to
+     * where the wall clock now is -- which is exactly where audio has been all
+     * along. Stopping audio instead would silence the player whenever anything
+     * else was in front of it, which is not what a video player does.
+     */
+    it('keeps playing while the presented frame is frozen', () => {
+        const harness = build();
+        harness.output.start(0, 1);
+        const [source] = harness.context.startedSources;
+
+        // The intended position keeps pace with the audio clock, because both
+        // derive from clocks that do not stop. Only the picture has stopped.
+        for (let pass = 1; pass <= 10; pass++) {
+            harness.context.advance(0.2);
+            harness.setPlayheadOnly(0.2 * pass);
+            jest.advanceTimersByTime(200);
+        }
+
+        expect(source.stopped).toBe(false);
+        expect(harness.output.playing).toBe(true);
+    });
+
+    /**
+     * The regression that started all of this. Drift used to be measured
+     * against the PRESENTED frame, which freezes with the render loop -- so an
+     * occluded window read as ever-growing drift, resynced to the frozen
+     * position, and did it again on every pass. Heard as the same fraction of a
+     * second replaying indefinitely the moment another window was maximised.
+     *
+     * Measuring against the continuous anchor instead means there is no drift
+     * to correct, and nothing to restart.
+     */
+    it('does not restart audio over and over while the picture is frozen', () => {
+        const harness = build();
+        harness.output.start(0, 1);
+
+        for (let pass = 1; pass <= 10; pass++) {
+            harness.context.advance(0.2);
+            harness.setPlayheadOnly(0.2 * pass);
+            jest.advanceTimersByTime(200);
+        }
+
+        // Two units scheduled across two seconds of playback, and no third
+        // copy of either: no resync fired.
+        expect(harness.context.startedSources).toHaveLength(2);
+        expect(harness.context.startedSources.filter((s) => s.started.offset > 0.5)).toHaveLength(0);
     });
 });
 

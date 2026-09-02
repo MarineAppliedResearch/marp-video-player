@@ -287,6 +287,33 @@ export class Scheduler {
     }
 
     /**
+     * Where playback is *aiming*, continuously, rather than which frame is on
+     * screen.
+     *
+     * The same value `_tick` computes its target from, so it is the render
+     * loop's own intent and not a second clock. It exists because
+     * `currentTime` reports the presented frame, which advances in whole
+     * frames -- 40ms steps at 25fps -- and anything comparing itself against a
+     * continuous schedule therefore sees up to a frame of disagreement that is
+     * not error. Measured against audio it produced repeated resyncs of
+     * 50-120ms on ordinary playback, each one an audible discontinuity, over a
+     * mismatch that did not exist.
+     *
+     * Only meaningful while genuinely playing; falls back to the presented
+     * frame otherwise.
+     *
+     * @returns {number} Intended playback position, in seconds.
+     */
+    get playbackPosition() {
+        if (!this.playing || this.seekingFlag) {
+            return this.currentTime;
+        }
+
+        const elapsedSeconds = (performance.now() - this._anchorWallClockMs) / 1000;
+        return Math.max(0, Math.min(this.duration, this._anchorTime + elapsedSeconds * this.playbackRate));
+    }
+
+    /**
      * Maps a decoded frame timestamp onto the stream's media timeline for
      * the segment it belongs to.
      *

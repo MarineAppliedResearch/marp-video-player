@@ -140,11 +140,12 @@ describe('AudioStore', () => {
     });
 
     /**
-     * Scheduling passes run several times a second. A unit that cannot decode
-     * will not start decoding because it was asked again 200ms later, and
-     * retrying would burn a decode attempt per pass forever.
+     * The commonest audio decode failure is not a bad unit at all: it is the
+     * decoder giving up while the picture saturates the machine. Retrying once
+     * costs almost nothing and recovers that case, which was observed leaving
+     * a whole unit silent.
      */
-    it('gives up permanently on a unit that fails to decode', async () => {
+    it('retries a unit that fails to decode once before giving up', async () => {
         const { store, audioDecoder } = build();
         audioDecoder.decodeUnit = jest.fn(async () => {
             throw new Error('bad audio');
@@ -155,8 +156,47 @@ describe('AudioStore', () => {
         store.request(0);
         await settle();
 
-        expect(audioDecoder.decodeUnit).toHaveBeenCalledTimes(1);
+        expect(audioDecoder.decodeUnit).toHaveBeenCalledTimes(2);
         expect(store.get(0)).toBeNull();
+    });
+
+    /**
+     * Retrying cannot be unbounded: the scheduling passes run several times a
+     * second, and a genuinely undecodable unit will not become decodable by
+     * being asked forever.
+     */
+    it('stops retrying a unit that keeps failing', async () => {
+        const { store, audioDecoder } = build();
+        audioDecoder.decodeUnit = jest.fn(async () => {
+            throw new Error('bad audio');
+        });
+
+        for (let attempt = 0; attempt < 6; attempt++) {
+            store.request(0);
+            await settle();
+        }
+
+        expect(audioDecoder.decodeUnit).toHaveBeenCalledTimes(2);
+    });
+
+    it('recovers a unit whose first decode failed under load', async () => {
+        const { store, audioDecoder } = build();
+        let calls = 0;
+        audioDecoder.decodeUnit = jest.fn(async (unitIndex) => {
+            calls += 1;
+            if (calls === 1) {
+                throw new Error('AudioDecoder produced no output');
+            }
+            return { unitIndex, sampleRate: 48000, numberOfChannels: 2, startTime: 0, duration: 1, channels: [new Float32Array(1)] };
+        });
+
+        store.request(0);
+        await settle();
+        expect(store.get(0)).toBeNull();
+
+        store.request(0);
+        await settle();
+        expect(store.get(0)).not.toBeNull();
     });
 
     /**
@@ -255,9 +295,12 @@ describe('AudioStore', () => {
             return { unitIndex, sampleRate: 48000, numberOfChannels: 2, startTime: 0, duration: 1, channels: [new Float32Array(1)] };
         });
 
-        store.request(0);
-        store.request(1);
-        await settle();
+        // Twice, so unit 0 exhausts its attempts and is given up on for good.
+        for (let attempt = 0; attempt < 2; attempt++) {
+            store.request(0);
+            store.request(1);
+            await settle();
+        }
 
         store.clear();
         expect(store.get(1)).toBeNull();
@@ -266,9 +309,9 @@ describe('AudioStore', () => {
         store.request(1);
         await settle();
 
-        // Unit 1 decoded again; unit 0 was not retried.
+        // Unit 1 decoded again; unit 0 was not attempted a third time.
         expect(store.get(1)).not.toBeNull();
-        expect(audioDecoder.decodeUnit.mock.calls.filter(([index]) => index === 0)).toHaveLength(1);
+        expect(audioDecoder.decodeUnit.mock.calls.filter(([index]) => index === 0)).toHaveLength(2);
     });
 
     it('closes the decoder on close()', () => {

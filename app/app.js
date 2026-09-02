@@ -522,12 +522,40 @@ for (const [key, rate] of Object.entries(MarpVideoEngine.SPEED_KEYMAP)) {
 }
 
 /**
- * True when the event came from a form field, where keys must be left
- * alone -- the panel is full of text inputs, and space belongs to them.
+ * True when the event came from a field where the keystroke belongs to the
+ * field rather than to playback -- the panel is full of text inputs, and space
+ * belongs to them.
+ *
+ * Deliberately narrowed to inputs that TAKE TEXT. Treating every <input> as a
+ * typing field meant that clicking the volume slider -- an <input type="range">,
+ * which keeps focus after a click -- silently killed every shortcut on this
+ * page: arrows, the speed keys, and space, all at once, until something else
+ * was focused. Range, checkbox, radio and button inputs have no text to type
+ * into and must not capture playback keys.
  */
+const TEXT_ENTRY_INPUT_TYPES = new Set([
+    "text", "password", "search", "email", "url", "tel", "number",
+    "date", "datetime-local", "month", "time", "week",
+]);
+
 function typingInField(target) {
-    const tag = target && target.tagName;
-    return tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || (target && target.isContentEditable);
+    if (!target) {
+        return false;
+    }
+    if (target.isContentEditable) {
+        return true;
+    }
+
+    const tag = target.tagName;
+    if (tag === "SELECT" || tag === "TEXTAREA") {
+        return true;
+    }
+    if (tag !== "INPUT") {
+        return false;
+    }
+
+    // An <input> with no type attribute is a text field.
+    return TEXT_ENTRY_INPUT_TYPES.has((target.getAttribute("type") || "text").toLowerCase());
 }
 
 document.addEventListener("keydown", (event) => {

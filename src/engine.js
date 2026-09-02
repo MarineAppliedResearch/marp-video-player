@@ -197,12 +197,14 @@ export async function createMarpVideoEngine(canvas, options) {
             },
         });
 
-        scheduler.setAudioOutput(
-            new AudioOutput({
+        const audioOutput = new AudioOutput({
                 segmentIndex,
                 store: audioStore,
-                // The clock, and the only one. See audio-output.js.
-                getPlayheadTime: () => scheduler.currentTime,
+                // The clock, and the only one. See audio-output.js. The
+                // continuous position rather than the presented frame: the
+                // latter advances in whole frames, and comparing a continuous
+                // schedule against it reads a frame of quantisation as drift.
+                getPlayheadTime: () => scheduler.playbackPosition,
                 onDebug: (message) => {
                     if (shim) {
                         shim._dispatch('debug', { message });
@@ -216,8 +218,19 @@ export async function createMarpVideoEngine(canvas, options) {
                         shim._dispatch('volumechange', { volume: shim.volume, muted: shim.muted });
                     }
                 },
-            })
-        );
+        });
+
+        // Scheduled the instant a unit decodes rather than on the next poll:
+        // the first unit is what the listener hears as the start, and waiting
+        // a scheduling interval for it clips exactly that.
+        audioStore.onUnitReady = () => audioOutput.onUnitReady();
+
+        scheduler.setAudioOutput(audioOutput);
+
+        // Warmed while the rest of the engine finishes coming up, so pressing
+        // play does not wait on a cold audio decoder. Measured at 1.4s of the
+        // opening lost without this.
+        audioStore.request(0);
 
         console.log('[video-engine] audio track available');
     }

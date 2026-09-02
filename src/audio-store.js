@@ -33,6 +33,20 @@
 const DEFAULT_MAX_UNITS = 4;
 
 /**
+ * How many times a unit may fail to decode before it is given up on.
+ *
+ * More than one because the commonest failure is not a bad unit at all: the
+ * audio decoder giving up while the picture was saturating the machine. The
+ * contention that caused it is usually over by the time anything asks again.
+ * Bounded because a genuinely undecodable unit will not become decodable by
+ * being asked five times a second forever.
+ *
+ * @constant
+ * @type {number}
+ */
+const MAX_DECODE_ATTEMPTS = 2;
+
+/**
  * Fetches (from cache only), decodes and holds audio units.
  *
  * @class AudioStore
@@ -45,23 +59,27 @@ export class AudioStore {
      * @param {Object} params.audioDecoder - {@link module:video-engine/audio-decoder.AudioUnitDecoder} instance.
      * @param {number} [params.maxUnits] - How many decoded units to keep.
      * @param {function(string): void} [params.onDebug] - Progress messages.
+     * @param {function(number): void} [params.onUnitReady] - Called with a unit index once it is decoded and cached. Lets a consumer act the moment a unit lands rather than on its next poll, which is the difference between audio starting with the picture and starting a scheduling interval later.
      */
-    constructor({ mediaSource, segmentFetcher, audioDecoder, maxUnits, onDebug }) {
+    constructor({ mediaSource, segmentFetcher, audioDecoder, maxUnits, onDebug, onUnitReady }) {
         this.mediaSource = mediaSource;
         this.segmentFetcher = segmentFetcher;
         this.audioDecoder = audioDecoder;
         this.maxUnits = maxUnits || DEFAULT_MAX_UNITS;
         this.onDebug = onDebug;
+        this.onUnitReady = onUnitReady || null;
 
         /** Decoded units, in least-recently-used-first order. @type {Map<number, Object>} */
         this.units = new Map();
         this._inFlight = new Map();
 
-        // Units whose decode failed. A failure here is permanent for that
-        // unit rather than worth retrying every scheduling pass: the passes
-        // run several times a second, and a unit that cannot decode will not
-        // start decoding because it was asked again 200ms later.
+        // Units given up on, and how many times each unit has failed so far.
+        // Failure is not permanent on the first attempt -- see
+        // MAX_DECODE_ATTEMPTS -- but it has to become permanent eventually,
+        // because the scheduling passes run several times a second and a unit
+        // that cannot decode will not start decoding by being asked again.
         this._failed = new Set();
+        this._attempts = new Map();
     }
 
     /**
@@ -106,19 +124,30 @@ export class AudioStore {
 
         const promise = this._decode(unitIndex)
             .catch((err) => {
-                // Only a real decode failure is permanent. Tier 1 can evict a
-                // unit's bytes between the check above and the read inside
-                // fetchAudioChunks -- `getCachedRawBytes` throws when it does
-                // -- and that says nothing about whether the audio is
-                // decodable. Marking it failed would leave the unit silent for
-                // the rest of the session over a cache eviction that has
-                // already been undone by the time anyone plays it again.
-                if (this.segmentFetcher.hasRawBytes(unitIndex)) {
-                    this._failed.add(unitIndex);
-                    this._logDebug(`unit ${unitIndex}: audio decode failed, this unit will be silent -- ${err.message}`);
-                } else {
+                // Tier 1 can evict a unit's bytes between the check above and
+                // the read inside fetchAudioChunks -- `getCachedRawBytes`
+                // throws when it does -- and that says nothing about whether
+                // the audio is decodable. It does not count as an attempt.
+                if (!this.segmentFetcher.hasRawBytes(unitIndex)) {
                     this._logDebug(`unit ${unitIndex}: raw bytes went away mid-decode, will try again -- ${err.message}`);
+                    return null;
                 }
+
+                const attempts = (this._attempts.get(unitIndex) || 0) + 1;
+                this._attempts.set(unitIndex, attempts);
+
+                if (attempts >= MAX_DECODE_ATTEMPTS) {
+                    this._failed.add(unitIndex);
+                    this._logDebug(
+                        `unit ${unitIndex}: audio decode failed ${attempts} times, this unit will be silent -- ${err.message}`
+                    );
+                } else {
+                    // Most often a decoder that gave up while the picture was
+                    // saturating the machine. The contention that caused it is
+                    // usually over by the time anything asks again.
+                    this._logDebug(`unit ${unitIndex}: audio decode failed, will try once more -- ${err.message}`);
+                }
+
                 return null;
             })
             .finally(() => {
@@ -180,6 +209,10 @@ export class AudioStore {
     _store(unitIndex, unit) {
         this.units.set(unitIndex, unit);
 
+        if (this.onUnitReady) {
+            this.onUnitReady(unitIndex);
+        }
+
         while (this.units.size > this.maxUnits) {
             const oldest = this.units.keys().next().value;
             this.units.delete(oldest);
@@ -209,6 +242,7 @@ export class AudioStore {
         this.units.clear();
         this._inFlight.clear();
         this._failed.clear();
+        this._attempts.clear();
         this.audioDecoder.close();
     }
 

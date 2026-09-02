@@ -95,7 +95,7 @@ export class AudioOutput {
      * @param {Object} params
      * @param {Object} params.segmentIndex - SegmentIndex, for mapping a media time onto a unit.
      * @param {Object} params.store - {@link module:video-engine/audio-store.AudioStore} instance.
-     * @param {function(): number} params.getPlayheadTime - Reads the authoritative media position, in seconds. This is the clock.
+     * @param {function(): number} params.getPlayheadTime - Reads where playback is aiming, continuously, in seconds. This is the clock.
      * @param {function(string): void} [params.onDebug] - Progress messages.
      * @param {function(): void} [params.onStateChange] - Called when the browser's willingness to make sound changes, so a consumer can re-read {@link AudioOutput#blocked} and tell someone. Deliberately NOT called for volume and mute: those are set from outside, and whoever set them announces them.
      */
@@ -246,12 +246,8 @@ export class AudioOutput {
 
         this._rate = rate;
         this._playing = true;
-        this._epoch += 1;
 
-        this._baseMediaTime = mediaTime;
-        this._baseContextTime = this._context.currentTime;
-        this._cursorUnit = findSegmentForTime(this.segmentIndex, mediaTime).index;
-        this._cursorMediaTime = mediaTime;
+        this._anchorAt(mediaTime);
 
         // Run one pass immediately rather than waiting a full interval, so
         // audio starts with the picture instead of up to 200ms after it.
@@ -272,6 +268,23 @@ export class AudioOutput {
         }
 
         this._playing = false;
+        this._cancelScheduled();
+    }
+
+    /**
+     * Cancels every scheduled buffer without ending playback.
+     *
+     * Separate from {@link AudioOutput#stop} because two different things need
+     * to happen here: a stop ends the scheduling passes entirely, while a
+     * re-anchor or a frozen picture has to silence what is already queued and
+     * keep the passes running, or nothing would ever notice the picture moving
+     * again.
+     *
+     * @returns {void}
+     */
+    _cancelScheduled() {
+        // Invalidates the onended handlers of everything being cancelled, so a
+        // late callback cannot mutate the list a new run is building.
         this._epoch += 1;
 
         for (const source of this._scheduled) {
@@ -285,6 +298,20 @@ export class AudioOutput {
             }
         }
         this._scheduled = [];
+    }
+
+    /**
+     * Fixes the mapping from media time to context time at a position, and
+     * points the scheduling cursor there.
+     *
+     * @param {number} mediaTime - Media position to anchor at, in seconds.
+     * @returns {void}
+     */
+    _anchorAt(mediaTime) {
+        this._baseMediaTime = mediaTime;
+        this._baseContextTime = this._context.currentTime;
+        this._cursorUnit = findSegmentForTime(this.segmentIndex, mediaTime).index;
+        this._cursorMediaTime = mediaTime;
     }
 
     /**
@@ -309,6 +336,21 @@ export class AudioOutput {
     }
 
     /**
+     * Called when a unit finishes decoding, so it can be scheduled at once
+     * rather than at the next pass.
+     *
+     * The first unit is what a listener hears as the start, and waiting a
+     * whole scheduling interval for it clips exactly that.
+     *
+     * @returns {void}
+     */
+    onUnitReady() {
+        if (this._playing && !this._closed) {
+            this._pass();
+        }
+    }
+
+    /**
      * One look-ahead scheduling pass: correct any drift, then schedule
      * whatever now falls inside the window.
      *
@@ -319,9 +361,7 @@ export class AudioOutput {
             return;
         }
 
-        if (this._correctDrift()) {
-            return;
-        }
+        this._reanchorIfDrifted();
 
         const context = this._context;
         const segments = this.segmentIndex.segments;
@@ -361,33 +401,38 @@ export class AudioOutput {
     }
 
     /**
-     * Measures how far the scheduled audio has drifted from the video
-     * position, and restarts audio there if it is past the limit.
+     * Measures how far the scheduled audio has drifted from the video position
+     * and re-anchors it there if it is past the limit.
      *
-     * This is the only place the two hardware clocks are reconciled, and it
-     * only ever moves audio. It also covers every case where the picture
-     * moved without audio being told -- a stall, a rate change applied
-     * elsewhere -- because those show up here as exactly the same thing: the
-     * playhead is no longer where the schedule says.
+     * This is the only place the two hardware clocks are reconciled -- the
+     * system clock the render loop runs on, and the audio hardware's own --
+     * and it only ever moves audio. It also catches any case where the picture
+     * moved without audio being told, because that shows up here as the same
+     * thing: the playhead is not where the schedule says.
      *
-     * @returns {boolean} True if audio was restarted, meaning this pass is over.
+     * It re-anchors rather than restarting: `start()` would tear down and
+     * rebuild the timer from inside its own callback, and there is nothing to
+     * rebuild. The pass continues immediately afterwards on the new mapping,
+     * so the correction costs one discontinuity and no silence.
+     *
+     * @returns {void}
      */
-    _correctDrift() {
+    _reanchorIfDrifted() {
         const playhead = this.getPlayheadTime();
         if (!Number.isFinite(playhead)) {
-            return false;
+            return;
         }
 
         const scheduledNow = this._baseMediaTime + (this._context.currentTime - this._baseContextTime) * this._rate;
         const error = playhead - scheduledNow;
 
         if (Math.abs(error) <= DRIFT_LIMIT_SECONDS) {
-            return false;
+            return;
         }
 
         this._logDebug(`resyncing audio: ${(error * 1000).toFixed(1)}ms from the picture`);
-        this.start(playhead, this._rate);
-        return true;
+        this._cancelScheduled();
+        this._anchorAt(playhead);
     }
 
     /**

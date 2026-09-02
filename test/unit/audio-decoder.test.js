@@ -227,21 +227,61 @@ describe('AudioUnitDecoder', () => {
      * would arrive through the shared sink and be attributed to whichever unit
      * decodes next -- the same failure gop-decoder.js documents for video.
      */
-    it('gives up on a stalled decoder and closes it', async () => {
+    it('gives up on a decoder that produces nothing at all, and closes it', async () => {
         jest.useFakeTimers();
         FakeAudioDecoder.simulateStall = true;
 
         const decoder = new AudioUnitDecoder();
         const pending = decoder.decodeUnit(2, makeAudioResult(1));
-        const asserted = expect(pending).rejects.toThrow(/stalled decoding unit 2/);
+        const asserted = expect(pending).rejects.toThrow(/produced no output for unit 2/);
 
         // The async form, because the watchdog's setTimeout is only created
         // after `isConfigSupported` has been awaited -- advancing
         // synchronously would run the clock before the timer exists.
-        await jest.advanceTimersByTimeAsync(5000);
+        await jest.advanceTimersByTimeAsync(10_000);
         await asserted;
 
         expect(FakeAudioDecoder.instances[0].state).toBe('closed');
+        jest.useRealTimers();
+    });
+
+    /**
+     * The regression this watchdog was rewritten for. A ten-second GOP carries
+     * over 900 audio frames, and while the picture's own 250 frames are being
+     * decoded and copied out of GPU memory the audio decoder was observed
+     * managing 130 of them in five seconds -- progressing throughout, and
+     * killed anyway by a total-time budget. The unit then went permanently
+     * silent, which is what "audio stops after about five seconds" was.
+     *
+     * A decode that keeps producing output must never be killed, however long
+     * it takes in total.
+     */
+    it('never gives up on a decoder that is merely slow', async () => {
+        jest.useFakeTimers();
+        // Eight seconds between outputs: comfortably inside the no-progress
+        // window, and far beyond any total budget across three of them.
+        FakeAudioDecoder.slowOutputMs = 8000;
+
+        const decoder = new AudioUnitDecoder();
+        const pending = decoder.decodeUnit(1, makeAudioResult(3));
+
+        await jest.advanceTimersByTimeAsync(30_000);
+        const result = await pending;
+
+        expect(result.channels[0]).toHaveLength(3 * 1024);
+        expect(FakeAudioDecoder.instances[0].state).toBe('configured');
+        jest.useRealTimers();
+    });
+
+    it('marks a no-output failure as worth another attempt', async () => {
+        jest.useFakeTimers();
+        FakeAudioDecoder.simulateStall = true;
+
+        const pending = new AudioUnitDecoder().decodeUnit(0, makeAudioResult(1));
+        const asserted = expect(pending).rejects.toMatchObject({ stalled: true });
+
+        await jest.advanceTimersByTimeAsync(10_000);
+        await asserted;
         jest.useRealTimers();
     });
 

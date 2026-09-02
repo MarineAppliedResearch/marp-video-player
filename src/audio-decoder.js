@@ -24,19 +24,29 @@
  */
 
 /**
- * Max time to wait for a unit's flush() before treating the decoder as
- * stalled, in ms.
+ * How long the decoder may produce NOTHING AT ALL before it is treated as
+ * stalled, in ms. Reset by every output, so this measures a lack of progress
+ * rather than a budget for the whole unit.
  *
- * Shorter than gop-decoder.js's 20s equivalent, and deliberately so: audio
- * is roughly a thousandth of the decode work of the video beside it, so a
- * budget that generous would only mean a silent player taking 20 seconds to
- * admit something is wrong. A failure here costs sound, never picture --
- * see the module comment on audio-output.js.
+ * It is written that way because a fixed total budget was wrong here, and
+ * measurably so. The first version allowed 5 seconds per unit, reasoning that
+ * audio is a fraction of the decode work of the picture beside it. That
+ * reasoning ignored contention: a ten-second 1080p GOP has its own 250 frames
+ * being decoded and copied out of GPU memory at the same time, and against
+ * that the audio decoder was observed managing 130 of a unit's 938 frames in
+ * five seconds -- progressing the whole time, and killed anyway. The unit then
+ * went permanently silent, which is what "audio stops after about five
+ * seconds" turned out to be.
+ *
+ * gop-decoder.js records being bitten by the same thing and answered it by
+ * raising its total budget to 20 seconds. Keying on progress is the better
+ * answer: a decoder that is merely slow is never killed however long it takes,
+ * and one that is genuinely wedged is caught just as fast.
  *
  * @constant
  * @type {number}
  */
-const DECODE_WATCHDOG_MS = 5000;
+const DECODE_NO_PROGRESS_MS = 10000;
 
 /**
  * Decodes audio units into PCM through one shared, serialized AudioDecoder.
@@ -110,9 +120,16 @@ export class AudioUnitDecoder {
         // holding a unit's worth of them open while the rest decodes is the
         // same mistake gop-decoder.js documents at length for frames.
         const parts = [];
+
+        // Assigned once the watchdog below exists. Every output pushes the
+        // deadline out, which is what makes this a progress check rather than
+        // a time limit.
+        let noteProgress = () => {};
+
         this._currentSink = (audioData) => {
             try {
                 parts.push(copyOut(audioData));
+                noteProgress();
             } finally {
                 audioData.close();
             }
@@ -128,15 +145,27 @@ export class AudioUnitDecoder {
 
         let watchdogHandle;
         const watchdogPromise = new Promise((_, reject) => {
-            watchdogHandle = setTimeout(() => {
-                reject(
-                    new Error(
-                        `AudioDecoder stalled decoding unit ${unitIndex}: flush() did not settle within ` +
-                            `${DECODE_WATCHDOG_MS}ms (decodeQueueSize=${this._decoder.decodeQueueSize}, ` +
-                            `state=${this._decoder.state}, outputsSoFar=${parts.length}).`
-                    )
-                );
-            }, DECODE_WATCHDOG_MS);
+            const arm = () => {
+                watchdogHandle = setTimeout(() => {
+                    const error = new Error(
+                        `AudioDecoder produced no output for unit ${unitIndex} in ${DECODE_NO_PROGRESS_MS}ms ` +
+                            `(decodeQueueSize=${this._decoder.decodeQueueSize}, state=${this._decoder.state}, ` +
+                            `outputsSoFar=${parts.length}). This is a wedged decoder, not a slow one.`
+                    );
+                    // Marks it as worth another attempt: a decoder that stopped
+                    // producing says nothing about whether these bytes are
+                    // decodable, unlike a codec the platform refuses outright.
+                    error.stalled = true;
+                    reject(error);
+                }, DECODE_NO_PROGRESS_MS);
+            };
+
+            noteProgress = () => {
+                clearTimeout(watchdogHandle);
+                arm();
+            };
+
+            arm();
         });
 
         for (const chunk of chunks) {
