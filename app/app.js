@@ -196,9 +196,12 @@ h("hStepBack").addEventListener("click", () => {
     player.currentTime = Math.max(0, player.currentTime - 1 / player.fps);
 });
 h("hMute").addEventListener("click", () => {
-    // Inert until audio lands, but wired the way a host would.
     player.muted = !player.muted;
     report("muted", player.muted);
+});
+h("hVolume").addEventListener("input", (event) => {
+    player.volume = Number(event.target.value);
+    report("volume", player.volume);
 });
 h("hFullscreen").addEventListener("click", () => player.toggleFullscreen());
 

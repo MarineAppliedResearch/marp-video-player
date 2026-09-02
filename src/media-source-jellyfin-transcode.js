@@ -87,6 +87,20 @@ export class JellyfinTranscodeMediaSource {
         this.segmentFetcher = null;
         this._segmentIndex = null;
 
+        // Learned from the first demux rather than at load(): the audio
+        // track's configuration lives in the init segment, which this source
+        // does not read until a unit is actually wanted. The engine demuxes
+        // unit 0 while starting up, so this is populated before anything asks
+        // whether the stream has audio.
+        this._audioConfig = null;
+
+        // Each unit's own first video timestamp, as captured by fetchChunks.
+        // Audio is placed on the playlist timeline using the same correction
+        // the scheduler applies to video, so the two keep the relative offset
+        // they were encoded with instead of both being snapped to the unit
+        // boundary independently.
+        this._unitFirstVideoTimestampMicros = new Map();
+
         // Behind sessions currently installed, keyed by role, so each can be
         // re-anchored independently: 'close' hugs the playhead and re-anchors
         // often, 'extended' owns the deeper section and rarely does.
@@ -182,6 +196,20 @@ export class JellyfinTranscodeMediaSource {
         // frames back out after decode.
         const unitFirstTimestampMicros = demuxResult.chunks.length > 0 ? demuxResult.chunks[0].timestamp : null;
 
+        if (!this._audioConfig && demuxResult.audio) {
+            // Config only -- no samples were extracted here (see the
+            // demuxer's own `includeAudio` note). Kept without its empty
+            // chunks array so the stored value cannot be mistaken for a
+            // unit's worth of audio.
+            const { chunks: _unused, ...config } = demuxResult.audio;
+            this._audioConfig = config;
+            this._logDebug(`audio: ${config.codec} ${config.sampleRate}Hz ${config.numberOfChannels}ch`);
+        }
+
+        if (unitFirstTimestampMicros !== null) {
+            this._unitFirstVideoTimestampMicros.set(unitIndex, unitFirstTimestampMicros);
+        }
+
         if (demuxResult.chunks.length === 0 || demuxResult.chunks[0].type !== 'key') {
             // Defensive: this unit's first sample isn't a keyframe, contrary
             // to Jellyfin's BreakOnNonKeyFrames=False guarantee. Merge the
@@ -203,6 +231,77 @@ export class JellyfinTranscodeMediaSource {
         }
 
         return { ...demuxResult, unitFirstTimestampMicros };
+    }
+
+    /** @returns {boolean} True once a demuxed unit has shown this stream carries usable audio. */
+    hasAudio() {
+        return this._audioConfig !== null;
+    }
+
+    /**
+     * @returns {?{codec: string, description: (Uint8Array|null), sampleRate: number, numberOfChannels: number, language: (string|undefined)}} Decoder configuration, or null when there is no usable audio.
+     */
+    getAudioConfig() {
+        return this._audioConfig;
+    }
+
+    /**
+     * Demuxes one unit's audio out of the segment bytes already fetched for
+     * its picture.
+     *
+     * Costs no network at all: Jellyfin's transcode is a single muxed
+     * variant, so a segment's audio is inside the same bytes its video came
+     * from. It is a second demux of those bytes rather than a second fetch,
+     * and only the audio track's samples are extracted.
+     *
+     * The timeline offset is the same correction the scheduler applies to
+     * video (`_frameTimestampToMediaTimeSeconds`): a transcoder's segment
+     * timestamps can sit a whole segment away from playlist time, and both
+     * tracks must be moved by the same amount or the picture and the sound
+     * would be aligned to the unit boundary independently and lose the
+     * offset they were encoded with.
+     *
+     * @async
+     * @param {number} unitIndex - Index of the unit to assemble.
+     * @returns {Promise<?{codec: string, description: (Uint8Array|null), sampleRate: number, numberOfChannels: number, chunks: Array<Object>, timelineOffsetMicros: number}>} Decoder-ready chunks, or null when there is no audio.
+     */
+    async fetchAudioChunks(unitIndex) {
+        if (!this._audioConfig) {
+            return null;
+        }
+
+        const unit = this._segmentIndex.segments[unitIndex];
+        if (!unit) {
+            throw new Error(`No unit at index ${unitIndex}`);
+        }
+
+        const initBuffer = await this.segmentFetcher.fetchInitSegment();
+        const segmentBuffer = this.segmentFetcher.getCachedRawBytes(unitIndex);
+
+        // Extract the video track too only when this unit's own first
+        // timestamp is not already known -- which it normally is, since audio
+        // is only ever wanted for a unit whose picture is being played.
+        const knownFirst = this._unitFirstVideoTimestampMicros.get(unitIndex);
+        const includeVideo = knownFirst === undefined;
+
+        const demuxResult = await demuxSegment(initBuffer, segmentBuffer, { includeVideo, includeAudio: true });
+
+        let firstVideoTimestampMicros = knownFirst;
+        if (includeVideo && demuxResult.chunks.length > 0) {
+            firstVideoTimestampMicros = demuxResult.chunks[0].timestamp;
+            this._unitFirstVideoTimestampMicros.set(unitIndex, firstVideoTimestampMicros);
+        }
+
+        const timelineOffsetMicros =
+            firstVideoTimestampMicros === undefined
+                ? 0
+                : Math.round(unit.startTime * 1e6) - firstVideoTimestampMicros;
+
+        return {
+            ...this._audioConfig,
+            chunks: demuxResult.audio ? demuxResult.audio.chunks : [],
+            timelineOffsetMicros,
+        };
     }
 
     /**

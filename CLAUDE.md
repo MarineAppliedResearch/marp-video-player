@@ -20,6 +20,19 @@ The C# WebView2 host in `VIDEO_PROCESSING_GUI` — a different repository — de
 
 `test/e2e/host-contract.spec.js` exists to catch exactly these.
 
+**Add, never change.** New information goes out as a further `status|` line, and
+new page options as a further query parameter. `metadata|` and `frame|` are split
+on a fixed field count by `MareMediaElement.xaml.cs`, so an extra field there
+breaks a host in a repository you cannot see; `HandleStatusMessage` matches known
+prefixes and logs anything else, so a new `status|` line is free. That is why the
+audio state goes out as `status|audio ...` and `status|volumechange ...` rather
+than as fields on `metadata|`.
+
+Worth knowing: the C# host already writes `window.marpVideo.volume` and
+`.muted` on every `Volume` set, and did so throughout the period when both were
+inert properties. Implementing them was not a contract change — it made wiring
+that was already there start working.
+
 ## Two guarantees the package must keep
 
 - **No runtime dependencies.** `mp4box` and the interface are compiled into the bundles. A consumer adds one file.
@@ -41,8 +54,8 @@ Two tiers, nothing else. There is deliberately no third category of scripts you 
 
 | Command | What | Speed |
 | --- | --- | --- |
-| `npm test` | 140 unit tests against fake WebCodecs globals. No server, network, or media. | seconds |
-| `npm run test:e2e` | 28 browser tests, real decoding. Starts its own server, downloads its own media. | minutes |
+| `npm test` | 258 unit tests against fake WebCodecs and Web Audio globals. No server, network, or media. | seconds |
+| `npm run test:e2e` | 49 browser tests, real decoding. Starts its own server, downloads its own media. | minutes |
 
 **Use `npm test` for feedback.** Do not run the browser suite routinely — it decodes real 1080p video against a live server with 120-second timeouts. Leave it to the person working, via the launcher.
 
@@ -70,6 +83,36 @@ tools/serve.mjs static server for both.
 test/unit/      Jest, no dependencies.
 test/e2e/       Playwright.
 ```
+
+## Audio
+
+Five modules: `audio-decoder.js` (one persistent `AudioDecoder`, PCM out),
+`audio-store.js` (a short LRU of decoded units), `audio-output.js` (the
+`AudioContext`, gain, and scheduling), `mp4-audio-config.js` (reading a track's
+decoder config), plus the audio half of each media source.
+
+Three rules, each of which cost something to establish:
+
+- **There is one clock.** The scheduler's `_anchorWallClockMs`/`_anchorTime` say
+  where playback is; audio is scheduled against that and never read back into
+  it. `Scheduler#_syncAudio` is the only thing that starts or stops audio, and
+  it is called on transitions only — calling it while audio runs restarts it,
+  which is audible.
+- **Audio never fetches.** `AudioStore` reads bytes Tier 1 already holds and
+  skips a unit whose bytes are absent. Missing audio is silence; a missing frame
+  is a stall, and audio must never compete for the connection pool.
+- **Audio never breaks playback.** A track that cannot be configured, a unit
+  that will not decode, a browser with no `AudioContext` — all of them end in
+  silence and a debug line, never a thrown error on the playback path.
+
+On the byte-range paths, each unit's byte range is *widened* at index time to
+cover the audio overlapping its own time span. Audio and video are interleaved
+sample by sample, so fetching ten seconds of audio on its own took 251 requests
+spanning 11 MB to collect 245 KB — while the video unit's range already covered
+95-98% of it. Widening costs about 5% more bytes and no extra requests.
+
+Do not trust `track.audio.sample_rate` from mp4box: it reports 0 for the 96 kHz
+AAC track in this project's own test media. Read the AudioSpecificConfig.
 
 ## Gotchas found the hard way
 

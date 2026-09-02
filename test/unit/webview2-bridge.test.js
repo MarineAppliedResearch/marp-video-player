@@ -26,6 +26,10 @@ class FakeMarpVideo {
         this.videoWidth = 1920;
         this.videoHeight = 1080;
         this.currentTime = 0;
+        this.volume = 1;
+        this.muted = false;
+        this.hasAudio = true;
+        this.audioBlocked = false;
     }
 
     addEventListener(type, callback) {
@@ -119,5 +123,73 @@ describe('attachWebView2Bridge', () => {
         attachWebView2Bridge(marpVideo);
 
         expect(() => marpVideo.dispatch('loadedmetadata')).not.toThrow();
+    });
+
+    /**
+     * Audio state goes out as further  lines rather than as extra
+     * fields on . HandleMetadataMessage splits on a fixed four
+     * fields and would break; HandleStatusMessage matches known prefixes and
+     * logs anything else, so an un-updated host is unaffected by these.
+     */
+    test('announces the audio state alongside loadedmetadata', () => {
+        const marpVideo = new FakeMarpVideo();
+        attachWebView2Bridge(marpVideo);
+
+        marpVideo.dispatch('loadedmetadata');
+
+        expect(window.chrome.webview.postMessage).toHaveBeenCalledWith(
+            'status|audio hasAudio=true volume=1.000000 muted=false blocked=false'
+        );
+    });
+
+    test('posts a volumechange line carrying volume, mute and blocked', () => {
+        const marpVideo = new FakeMarpVideo();
+        attachWebView2Bridge(marpVideo);
+
+        marpVideo.volume = 0.25;
+        marpVideo.muted = true;
+        marpVideo.dispatch('volumechange');
+
+        expect(window.chrome.webview.postMessage).toHaveBeenCalledWith(
+            'status|volumechange hasAudio=true volume=0.250000 muted=true blocked=false'
+        );
+    });
+
+    test('reports media with no audio track as such', () => {
+        const marpVideo = new FakeMarpVideo();
+        marpVideo.hasAudio = false;
+        attachWebView2Bridge(marpVideo);
+
+        marpVideo.dispatch('loadedmetadata');
+
+        expect(window.chrome.webview.postMessage).toHaveBeenCalledWith(
+            'status|audio hasAudio=false volume=1.000000 muted=false blocked=false'
+        );
+    });
+
+    /**
+     * The host may drive playback from native code with no user gesture ever
+     * happening in the page, so this is the only way it learns sound is being
+     * withheld rather than simply missing.
+     */
+    test('tells the host when the browser is withholding sound', () => {
+        const marpVideo = new FakeMarpVideo();
+        attachWebView2Bridge(marpVideo);
+
+        marpVideo.audioBlocked = true;
+        marpVideo.dispatch('volumechange');
+
+        expect(window.chrome.webview.postMessage).toHaveBeenCalledWith(
+            'status|volumechange hasAudio=true volume=1.000000 muted=false blocked=true'
+        );
+    });
+
+    test('still posts the original fixed-field lines unchanged', () => {
+        const marpVideo = new FakeMarpVideo();
+        attachWebView2Bridge(marpVideo);
+
+        marpVideo.dispatch('loadedmetadata');
+
+        expect(window.chrome.webview.postMessage).toHaveBeenCalledWith('metadata|39.168|1920|1080');
     });
 });

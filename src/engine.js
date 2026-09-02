@@ -19,6 +19,9 @@ import { FrameStore } from './frame-store.js';
 import { Scheduler } from './scheduler.js';
 import { CanvasRenderer } from './canvas-renderer.js';
 import { MarpVideoShim } from './marp-video-shim.js';
+import { AudioUnitDecoder } from './audio-decoder.js';
+import { AudioStore } from './audio-store.js';
+import { AudioOutput } from './audio-output.js';
 
 /**
  * Creates a frame-accurate bidirectional playback engine over a Jellyfin
@@ -176,6 +179,49 @@ export async function createMarpVideoEngine(canvas, options) {
         },
     });
 
+    // Audio, when the source has any. A source that predates this (or one
+    // written by a consumer of this package) has no such method, and media
+    // with no usable audio track answers false -- both mean the same thing
+    // here: no audio path is built at all, and nothing downstream has to
+    // know the difference.
+    let audioStore = null;
+    if (typeof mediaSource.hasAudio === 'function' && mediaSource.hasAudio()) {
+        audioStore = new AudioStore({
+            mediaSource,
+            segmentFetcher,
+            audioDecoder: new AudioUnitDecoder(),
+            onDebug: (message) => {
+                if (shim) {
+                    shim._dispatch('debug', { message });
+                }
+            },
+        });
+
+        scheduler.setAudioOutput(
+            new AudioOutput({
+                segmentIndex,
+                store: audioStore,
+                // The clock, and the only one. See audio-output.js.
+                getPlayheadTime: () => scheduler.currentTime,
+                onDebug: (message) => {
+                    if (shim) {
+                        shim._dispatch('debug', { message });
+                    }
+                },
+                // Fires when the browser starts or stops withholding sound,
+                // so a consumer's mute button can show that state rather
+                // than looking simply broken.
+                onStateChange: () => {
+                    if (shim) {
+                        shim._dispatch('volumechange', { volume: shim.volume, muted: shim.muted });
+                    }
+                },
+            })
+        );
+
+        console.log('[video-engine] audio track available');
+    }
+
     shim = new MarpVideoShim(scheduler, { videoWidth, videoHeight, fps });
 
     // Sources are usually built before the engine exists, so anything they
@@ -201,6 +247,14 @@ export async function createMarpVideoEngine(canvas, options) {
             mediaSource.stopPlaybackReporting();
         }
         closeShim();
+
+        // After closeShim(), which reaches the scheduler and closes the
+        // AudioOutput: the store and its decoder are what the output was
+        // reading from, so they go second.
+        if (audioStore) {
+            audioStore.close();
+            audioStore = null;
+        }
     };
     // Prime the first displayed frame and fire the initial metadata
     // events, matching a real <video> element's loadedmetadata/
