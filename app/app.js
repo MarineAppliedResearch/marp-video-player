@@ -485,9 +485,21 @@ function nudge(seconds) {
     player.currentTime = Math.min(player.duration, Math.max(0, player.currentTime + seconds));
 }
 
+/**
+ * The arrow keys shuttle the playback rate in half steps, and that lives in
+ * the library rather than here -- same reason the speed keys come from its own
+ * SPEED_KEYMAP: this page must not be able to disagree with the player about
+ * what a key does. Frame stepping moved to , and . accordingly.
+ */
+function stepPlaybackSpeed(direction) {
+    player.stepPlaybackRate(direction);
+}
+
 /** Steps exactly one frame. */
+// Both from the library, so this page cannot disagree with the player about
+// what a key does -- same reason the speed keys come from its own SPEED_KEYMAP.
 function stepFrame(direction) {
-    nudge(direction / player.fps);
+    player.stepFrame(direction);
 }
 
 /**
@@ -496,8 +508,10 @@ function stepFrame(direction) {
  */
 const HARNESS_KEYMAP = {
     " ": { label: "space  play/pause", run: () => (player.paused ? player.play() : player.pause()) },
-    ArrowLeft: { label: "left/right  step 1 frame", run: () => stepFrame(-1) },
-    ArrowRight: { label: "", run: () => stepFrame(1) },
+    ArrowLeft: { label: "left/right  -/+0.5x speed", run: () => stepPlaybackSpeed(-1) },
+    ArrowRight: { label: "", run: () => stepPlaybackSpeed(1) },
+    a: { label: "a / s  step 1 frame", run: () => stepFrame(1) },
+    s: { label: "", run: () => stepFrame(-1) },
     "Shift+ArrowLeft": { label: "shift+left/right  -/+1s", run: () => nudge(-1) },
     "Shift+ArrowRight": { label: "", run: () => nudge(1) },
     Home: { label: "home/end  start/end", run: () => { player.currentTime = 0; } },

@@ -52,6 +52,19 @@ export const SPEED_KEYMAP = {
     '\\': 16,
 };
 
+/**
+ * Shuttle step for the arrow keys, and the rate it will not step beyond.
+ *
+ * Matches PlaybackStepSize and PlaybackStepLimit in VIDEO_PROCESSING_GUI's
+ * VideoPlayer.xaml.cs. The desktop application had this behaviour first and
+ * implemented it in C# against the player; it lives here now so a host does
+ * not have to, and so the two cannot disagree about what an arrow key does.
+ */
+export const SPEED_STEP = 0.5;
+
+/** @constant @type {number} */
+export const SPEED_STEP_LIMIT = 16;
+
 /** How long the controls bar stays visible after the pointer stops moving during playback, in ms. */
 const CONTROLS_IDLE_HIDE_MS = 2500;
 
@@ -1147,6 +1160,62 @@ export class MarpVideoPlayer {
     }
 
     /**
+     * Steps exactly one frame, without changing whether playback is running.
+     *
+     * Bound to a and s, matching VIDEO_PROCESSING_GUI: a forward, s back.
+     *
+     * @param {number} direction - +1 for the next frame, -1 for the previous.
+     * @returns {void}
+     */
+    stepFrame(direction) {
+        if (!this.engine) {
+            return;
+        }
+        const next = this.engine.currentTime + direction / this.engine.fps;
+        this.engine.currentTime = Math.max(0, Math.min(this.engine.duration, next));
+    }
+
+    /**
+     * Steps the playback rate by half, in the given direction, and plays.
+     *
+     * The shuttle control the desktop application binds its left and right
+     * arrow keys to, implemented here so every consumer of this package gets
+     * the same behaviour rather than each host reimplementing it. The values
+     * match `PlaybackStepSize` and `PlaybackStepLimit` in
+     * VIDEO_PROCESSING_GUI's `VideoPlayer.xaml.cs`, which is where this
+     * behaviour existed first.
+     *
+     * The current rate is rounded onto the step grid before stepping, so a
+     * rate arrived at by speed hotkey (0.08x, 2.5x) lands on a clean multiple
+     * instead of carrying its remainder forward for ever. A stepped rate of
+     * zero pauses rather than setting a rate nothing can play.
+     *
+     * @param {number} direction - +1 to speed up, -1 to slow down or reverse further.
+     * @returns {void}
+     */
+    stepPlaybackRate(direction) {
+        if (!this.engine) {
+            return;
+        }
+
+        // Paused counts as zero, so the first press from a standstill gives
+        // half speed in the direction asked for rather than resuming at
+        // whatever rate was last used.
+        const current = this.engine.paused ? 0 : this.engine.playbackRate;
+        const grid = Math.round(current / SPEED_STEP) * SPEED_STEP;
+        const stepped = Math.max(-SPEED_STEP_LIMIT, Math.min(SPEED_STEP_LIMIT, grid + direction * SPEED_STEP));
+
+        if (stepped === 0) {
+            this.engine.pause();
+            this.log('playbackRate stepped to stop');
+            return;
+        }
+
+        this.setPlaybackRate(stepped);
+        this.engine.play();
+    }
+
+    /**
      * Shows the controls bar and restarts the idle-hide timer while playing.
      * Always visible while paused, while the pointer is over the bar, or
      * while the settings menu is open.
@@ -1649,6 +1718,22 @@ export class MarpVideoPlayer {
             if (event.key === ' ') {
                 event.preventDefault();
                 this.togglePlayPause();
+                return;
+            }
+
+            // Arrows shuttle the rate; a and s step one frame. Both come from
+            // VIDEO_PROCESSING_GUI, which bound them in C# against this player
+            // -- so a host had the behaviour and the player did not. Same keys,
+            // same directions, so muscle memory carries between the two.
+            if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+                event.preventDefault();
+                this.stepPlaybackRate(event.key === 'ArrowRight' ? 1 : -1);
+                return;
+            }
+
+            if (event.key === 'a' || event.key === 's') {
+                event.preventDefault();
+                this.stepFrame(event.key === 'a' ? 1 : -1);
                 return;
             }
 
