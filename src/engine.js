@@ -23,6 +23,9 @@ import { AudioUnitDecoder } from './audio-decoder.js';
 import { AudioStore } from './audio-store.js';
 import { AudioOutput } from './audio-output.js';
 
+
+
+
 /**
  * Creates a frame-accurate bidirectional playback engine over a Jellyfin
  * HLS/CMAF stream, backed by WebCodecs + a <canvas>, exposing a
@@ -180,58 +183,57 @@ export async function createMarpVideoEngine(canvas, options) {
     });
 
     // Audio, when the source has any. A source that predates this (or one
-    // written by a consumer of this package) has no such method, and media
-    // with no usable audio track answers false -- both mean the same thing
-    // here: no audio path is built at all, and nothing downstream has to
-    // know the difference.
-    let audioStore = null;
+    // written by a consumer of this package) has no such method, and media with
+    // no usable audio track answers false -- both mean the same thing here: no
+    // audio path is built at all.
+    //
+    // Decoded by the browser rather than by WebCodecs. Audio decoded the way
+    // the video is decoded ends up queued behind it, and the gap that produces
+    // is silence that can never be played late -- see audio-decoder.js and
+    // issue #6.
     if (typeof mediaSource.hasAudio === 'function' && mediaSource.hasAudio()) {
-        audioStore = new AudioStore({
+        const forwardDebug = (message) => {
+            if (shim) {
+                shim._dispatch('debug', { message });
+            }
+        };
+
+        // Declared first so the decoder's context accessor can close over it;
+        // it is only ever called once everything below exists.
+        let audioOutput = null;
+
+        const audioStore = new AudioStore({
             mediaSource,
             segmentFetcher,
-            audioDecoder: new AudioUnitDecoder(),
-            onDebug: (message) => {
+            audioDecoder: new AudioUnitDecoder({
+                getContext: () => (audioOutput ? audioOutput.ensureContext() : null),
+            }),
+            onDebug: forwardDebug,
+        });
+
+        audioOutput = new AudioOutput({
+            segmentIndex,
+            store: audioStore,
+            // The clock, and the only one. The continuous position rather than
+            // the presented frame: the latter advances in whole frames, and
+            // comparing a continuous schedule against it reads a frame of
+            // quantisation as drift.
+            getPlayheadTime: () => scheduler.playbackPosition,
+            onDebug: forwardDebug,
+            // Fires when the browser starts or stops withholding sound, so a
+            // consumer's mute button can show that rather than looking broken.
+            onStateChange: () => {
                 if (shim) {
-                    shim._dispatch('debug', { message });
+                    shim._dispatch('volumechange', { volume: shim.volume, muted: shim.muted });
                 }
             },
         });
 
-        const audioOutput = new AudioOutput({
-                segmentIndex,
-                store: audioStore,
-                // The clock, and the only one. See audio-output.js. The
-                // continuous position rather than the presented frame: the
-                // latter advances in whole frames, and comparing a continuous
-                // schedule against it reads a frame of quantisation as drift.
-                getPlayheadTime: () => scheduler.playbackPosition,
-                onDebug: (message) => {
-                    if (shim) {
-                        shim._dispatch('debug', { message });
-                    }
-                },
-                // Fires when the browser starts or stops withholding sound,
-                // so a consumer's mute button can show that state rather
-                // than looking simply broken.
-                onStateChange: () => {
-                    if (shim) {
-                        shim._dispatch('volumechange', { volume: shim.volume, muted: shim.muted });
-                    }
-                },
-        });
-
-        // Scheduled the instant a unit decodes rather than on the next poll:
-        // the first unit is what the listener hears as the start, and waiting
-        // a scheduling interval for it clips exactly that.
+        // Scheduled the instant a unit decodes rather than at the next poll: the
+        // first unit is what a listener hears as the start.
         audioStore.onUnitReady = () => audioOutput.onUnitReady();
 
         scheduler.setAudioOutput(audioOutput);
-
-        // Warmed while the rest of the engine finishes coming up, so pressing
-        // play does not wait on a cold audio decoder. Measured at 1.4s of the
-        // opening lost without this.
-        audioStore.request(0);
-
         console.log('[video-engine] audio track available');
     }
 
@@ -261,13 +263,6 @@ export async function createMarpVideoEngine(canvas, options) {
         }
         closeShim();
 
-        // After closeShim(), which reaches the scheduler and closes the
-        // AudioOutput: the store and its decoder are what the output was
-        // reading from, so they go second.
-        if (audioStore) {
-            audioStore.close();
-            audioStore = null;
-        }
     };
     // Prime the first displayed frame and fire the initial metadata
     // events, matching a real <video> element's loadedmetadata/

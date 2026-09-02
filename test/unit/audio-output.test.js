@@ -69,7 +69,7 @@ function makeStore(readyUnits) {
                 unitIndex: index,
                 sampleRate,
                 numberOfChannels: 2,
-                channels: [new Float32Array(UNIT_SECONDS * sampleRate), new Float32Array(UNIT_SECONDS * sampleRate)],
+                buffer: { duration: UNIT_SECONDS, sampleRate, numberOfChannels: 2, length: UNIT_SECONDS * sampleRate },
                 mediaStart: index * UNIT_SECONDS,
                 mediaEnd: (index + 1) * UNIT_SECONDS,
             },

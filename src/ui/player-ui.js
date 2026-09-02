@@ -1162,7 +1162,9 @@ export class MarpVideoPlayer {
     /**
      * Steps exactly one frame, without changing whether playback is running.
      *
-     * Bound to a and s, matching VIDEO_PROCESSING_GUI: a forward, s back.
+     * Bound to a and s: a steps back, s steps forward, following where the two
+     * keys sit on the keyboard. The desktop application's C# has them the other
+     * way round, which is worth correcting there rather than copying here.
      *
      * @param {number} direction - +1 for the next frame, -1 for the previous.
      * @returns {void}
@@ -1733,7 +1735,7 @@ export class MarpVideoPlayer {
 
             if (event.key === 'a' || event.key === 's') {
                 event.preventDefault();
-                this.stepFrame(event.key === 'a' ? 1 : -1);
+                this.stepFrame(event.key === 'a' ? -1 : 1);
                 return;
             }
 

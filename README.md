@@ -201,10 +201,16 @@ Generate the full reference with `npm run docs`.
 
 ## Audio
 
-Audio is decoded through WebCodecs alongside the picture and played through Web
-Audio. It costs no extra requests: on the byte-range paths a unit's audio lives
-inside the same bytes its video was fetched with, and on the Jellyfin transcode
-path it is already muxed into the same segments.
+Audio is decoded by the browser and scheduled against the video's clock. It
+costs no extra requests and no extra bytes: on the byte-range paths a unit's
+audio lives inside the same bytes its video was fetched with, and on the
+Jellyfin transcode path it is already inside the same segments.
+
+Deliberately *not* decoded through WebCodecs the way the video is. Doing that
+puts the audio decoder behind the video decoder in the platform's media
+pipeline, and one second of audio was measured taking ~4400 ms that way against
+36-78 ms through the browser's own decoder. A late video frame is a freeze; a
+late audio sample is silence for ever.
 
 | | |
 | --- | --- |
@@ -239,7 +245,7 @@ Requires WebCodecs: **Chrome and Edge 94+**. Firefox and Safari do not yet ship 
 npm install
 npm run build        # ESM, IIFE, and standalone bundles into dist/
 npm run serve        # static server on port 8099
-npm test             # 273 unit tests, no dependencies
+npm test             # 280 unit tests, no dependencies
 npm run docs         # JSDoc reference into docs/generated/
 ```
 
@@ -252,8 +258,8 @@ Open the folder and use **Run and Debug** (<kbd>F5</kbd>):
 | Configuration | What it does |
 | --- | --- |
 | Open player in browser | Rebuilds, starts the server, opens the player |
-| Run unit tests | 273 tests, no dependencies |
-| Run browser tests | 49 tests in a real browser |
+| Run unit tests | 280 tests, no dependencies |
+| Run browser tests | 50 tests in a real browser |
 | Build library | The three bundles into `dist/` |
 | Build docs | JSDoc reference into `docs/generated/` |
 

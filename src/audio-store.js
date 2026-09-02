@@ -22,10 +22,9 @@
  */
 
 /**
- * How many decoded units to keep. A 10-second stereo unit at 96 kHz is about
- * 7.7 MB of Float32, so four is a few tens of megabytes at the worst unit
- * length this engine has seen -- next to the video cache's gigabytes, small
- * enough not to need a byte budget of its own.
+ * How many decoded units to keep. A 10-second stereo unit is a few megabytes of
+ * AudioBuffer at the context's rate -- next to the video cache's gigabytes,
+ * small enough not to need a byte budget of its own.
  *
  * @constant
  * @type {number}
@@ -171,7 +170,7 @@ export class AudioStore {
             // A unit with no audio samples is perfectly ordinary -- a short
             // tail unit, or a gap in the audio track. Cache the emptiness so
             // it is not re-decoded on every pass.
-            const empty = { unitIndex, mediaStart: 0, mediaEnd: 0, sampleRate: 0, numberOfChannels: 0, channels: [] };
+            const empty = { unitIndex, mediaStart: 0, mediaEnd: 0, sampleRate: 0, numberOfChannels: 0, buffer: null };
             this._store(unitIndex, empty);
             return empty;
         }
@@ -189,7 +188,7 @@ export class AudioStore {
             unitIndex,
             sampleRate: pcm.sampleRate,
             numberOfChannels: pcm.numberOfChannels,
-            channels: pcm.channels,
+            buffer: pcm.buffer,
             mediaStart: pcm.startTime + offsetSeconds,
             mediaEnd: pcm.startTime + offsetSeconds + pcm.duration,
         };

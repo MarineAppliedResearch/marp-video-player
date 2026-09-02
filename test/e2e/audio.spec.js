@@ -197,6 +197,53 @@ test.describe('audio pipeline (local file)', () => {
         expect(first.rms).toBeGreaterThan(0.0001);
     });
 
+    /**
+     * The test that was missing, and the reason a badly broken audio path sat
+     * behind a green suite for a whole session. Everything else here asserts
+     * that *something* was scheduled carrying real samples; none of it asked
+     * whether sound was continuously audible, which is the only thing a
+     * listener notices.
+     *
+     * The failure it exists for was not subtle: audio played for four seconds,
+     * stopped for twenty-two, and resumed. Every other assertion in this file
+     * passed throughout. See issue #6.
+     */
+    test('leaves no audible gap across a real playback run', async () => {
+        await clearAudio(page);
+        await page.evaluate(() => {
+            window.marpVideo.currentTime = 0;
+            window.marpVideo.play();
+        });
+        await page.waitForTimeout(30_000);
+
+        const audio = await readAudio(page);
+        expect(audio.scheduled.length).toBeGreaterThan(0);
+
+        // Walk the scheduled buffers in audio-clock order and look for a moment
+        // with nothing playing. Each buffer covers (length - offset) / rate
+        // seconds of clock time from where it starts.
+        const ordered = [...audio.scheduled].sort((a, b) => a.when - b.when);
+        const gaps = [];
+        let covered = null;
+
+        for (const buffer of ordered) {
+            const from = buffer.when;
+            const to = buffer.when + (buffer.seconds - buffer.offset) / (buffer.rate || 1);
+            if (covered !== null && from - covered > 0.25) {
+                gaps.push({ from: +covered.toFixed(2), to: +from.toFixed(2), seconds: +(from - covered).toFixed(2) });
+            }
+            covered = covered === null ? to : Math.max(covered, to);
+        }
+
+        expect(gaps, `audible gaps: ${JSON.stringify(gaps)}`).toEqual([]);
+
+        // And it has to have reached roughly as far as the run lasted, rather
+        // than covering the first second and stopping.
+        expect(covered - ordered[0].when).toBeGreaterThan(25);
+
+        await page.evaluate(() => window.marpVideo.pause());
+    });
+
     test('plays at the rate the picture is playing at', async () => {
         const audio = await readAudio(page);
         expect(audio.scheduled[0].rate).toBe(1);

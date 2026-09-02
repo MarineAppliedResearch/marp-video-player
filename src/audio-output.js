@@ -232,6 +232,35 @@ export class AudioOutput {
     }
 
     /**
+     * The context to decode into, created if it does not exist yet.
+     *
+     * Decoding does not need a running context, so this is safe to call before
+     * any user gesture -- a suspended context decodes perfectly well and only
+     * playback is withheld.
+     *
+     * @returns {?AudioContext} The context, or null if this browser has none.
+     */
+    ensureContext() {
+        this._ensureContext();
+        return this._context;
+    }
+
+    /**
+     * Called when a unit finishes decoding, so it can be scheduled at once
+     * rather than at the next pass.
+     *
+     * The first unit is what a listener hears as the start, and waiting a whole
+     * scheduling interval for it clips exactly that.
+     *
+     * @returns {void}
+     */
+    onUnitReady() {
+        if (this._playing && !this._closed) {
+            this._pass();
+        }
+    }
+
+    /**
      * Starts audio from a media position, at a playback rate.
      *
      * A rate outside the audible band is not an error and not a special case
@@ -474,7 +503,7 @@ export class AudioOutput {
      * @returns {void}
      */
     _scheduleUnit(unit) {
-        if (!unit.channels || unit.channels.length === 0 || unit.mediaEnd <= unit.mediaStart) {
+        if (!unit.buffer || unit.mediaEnd <= unit.mediaStart) {
             return;
         }
 
@@ -499,18 +528,10 @@ export class AudioOutput {
             return;
         }
 
-        // Whichever is smaller: a unit whose declared channel count outran the
-        // planes the decoder actually produced would otherwise copy from an
-        // undefined channel and throw, taking out the whole scheduling pass
-        // over what should at worst be a quieter unit.
-        const channelCount = Math.min(unit.numberOfChannels, unit.channels.length);
-        const buffer = context.createBuffer(channelCount, unit.channels[0].length, unit.sampleRate);
-        for (let channel = 0; channel < channelCount; channel++) {
-            buffer.copyToChannel(unit.channels[channel], channel);
-        }
-
+        // The decoder already produced an AudioBuffer at this context's own
+        // rate, so it is scheduled as it is -- no copy, no resample.
         const source = context.createBufferSource();
-        source.buffer = buffer;
+        source.buffer = unit.buffer;
         source.playbackRate.value = this._rate;
         source.connect(this._gain);
 

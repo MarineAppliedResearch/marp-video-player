@@ -1,324 +1,203 @@
 /**
- * Unit tests for AudioUnitDecoder, run against the fake audio globals in
- * test/unit/fakes/webaudio-fakes.js rather than a real AudioDecoder -- so
- * these run under plain Node/Jest with no browser, while still exercising the
- * module's real queueing, assembly and failure handling.
+ * Unit tests for AudioUnitDecoder.
  *
- * @fileoverview Unit tests for AudioUnitDecoder's per-unit decode.
+ * The decoder is a thin thing now: frame the AAC as ADTS, hand it to
+ * `decodeAudioData`, and report where in the media the result belongs. It was
+ * not always thin — it used to drive a WebCodecs `AudioDecoder` with an output
+ * queue, a stall watchdog and hardware-surface bookkeeping, and none of that
+ * survived contact with the measurement in issue #6. What is left is tested
+ * here against a fake context.
+ *
+ * @fileoverview Unit tests for per-unit audio decode.
  * @author Isaac Travers
  * @module video-engine/test/unit/audio-decoder.test
  */
 
 const { AudioUnitDecoder } = require('../../src/audio-decoder.js');
-const { FakeAudioDecoder, FakeAudioData, installAudioFakes } = require('./fakes/webaudio-fakes.js');
 
-/** Restores the real (absent) globals after each test. */
-let restoreAudioFakes;
-
-beforeEach(() => {
-    restoreAudioFakes = installAudioFakes();
-});
-
-afterEach(() => {
-    restoreAudioFakes();
-});
+/** The reference media's real config: AAC-LC, 96 kHz, stereo. */
+const ASC = new Uint8Array([0x10, 0x10, 0x56, 0xe5, 0x00]);
 
 /**
- * Builds a media source's fetchAudioChunks() result: AAC frames of 1024
- * samples each, back to back from `startMicros`.
+ * A context whose `decodeAudioData` reports what it was given and returns a
+ * buffer whose length follows from it.
+ *
+ * @param {Object} [options]
+ * @param {boolean} [options.reject] - Refuse to decode, the way a browser does for a malformed stream.
+ * @returns {Object} `{context, calls}`.
+ */
+function makeContext({ reject = false } = {}) {
+    const calls = [];
+    return {
+        calls,
+        context: {
+            sampleRate: 48000,
+            async decodeAudioData(bytes) {
+                calls.push({ byteLength: bytes.byteLength });
+                if (reject) {
+                    throw new Error('Unable to decode audio data');
+                }
+                // One second, at the context's rate rather than the media's --
+                // decodeAudioData resamples on the way out.
+                return { duration: 1, sampleRate: 48000, numberOfChannels: 2, length: 48000 };
+            },
+        },
+    };
+}
+
+/**
+ * A media source's `fetchAudioChunks()` result.
  *
  * @param {number} count - How many frames.
- * @param {Object} [options]
- * @param {number} [options.sampleRate] - Sample rate to configure with.
- * @param {number} [options.startMicros] - Timestamp of the first frame.
- * @returns {Object} An audioResult, as AudioUnitDecoder.decodeUnit takes.
+ * @param {number} [startMicros] - Timestamp of the first frame.
+ * @returns {Object} An audioResult.
  */
-function makeAudioResult(count, { sampleRate = 48000, startMicros = 0 } = {}) {
-    const frameMicros = Math.round((1024 / sampleRate) * 1e6);
+function makeAudioResult(count, startMicros = 0) {
+    const frameMicros = Math.round((1024 / 96000) * 1e6);
 
     return {
         codec: 'mp4a.40.2',
-        description: new Uint8Array([0x11, 0x90]),
-        sampleRate,
+        description: ASC,
+        sampleRate: 96000,
         numberOfChannels: 2,
         chunks: Array.from({ length: count }, (_, i) => ({
             type: 'key',
             timestamp: startMicros + i * frameMicros,
             duration: frameMicros,
-            data: new Uint8Array([i]),
+            data: new Uint8Array(250).fill(i & 0xff),
         })),
     };
 }
 
 describe('AudioUnitDecoder', () => {
 
-    it('decodes a unit into one contiguous buffer per channel', async () => {
-        const decoder = new AudioUnitDecoder();
-        const result = await decoder.decodeUnit(3, makeAudioResult(4));
+    it('frames the unit and hands it to the context to decode', async () => {
+        const { context, calls } = makeContext();
+        const decoder = new AudioUnitDecoder({ getContext: () => context });
 
+        const result = await decoder.decodeUnit(3, makeAudioResult(10));
+
+        expect(calls).toHaveLength(1);
+        // Ten frames of 250 bytes, each with a seven-byte ADTS header.
+        expect(calls[0].byteLength).toBe(10 * 257);
         expect(result.unitIndex).toBe(3);
-        expect(result.sampleRate).toBe(48000);
-        expect(result.numberOfChannels).toBe(2);
-        expect(result.channels).toHaveLength(2);
-        expect(result.channels[0]).toHaveLength(4 * 1024);
-        expect(result.duration).toBeCloseTo((4 * 1024) / 48000, 6);
+        expect(result.buffer).not.toBeNull();
     });
 
-    it('reports the unit start from the first output rather than assuming zero', async () => {
-        const decoder = new AudioUnitDecoder();
-        const result = await decoder.decodeUnit(0, makeAudioResult(2, { startMicros: 10_000_000 }));
+    /**
+     * `decodeAudioData` knows nothing about where in the media this audio sits,
+     * so the position has to come from the chunks. Taking it from the buffer
+     * instead would put every unit at zero.
+     */
+    it('reports the unit position from the chunks, not the decoded buffer', async () => {
+        const { context } = makeContext();
+        const decoder = new AudioUnitDecoder({ getContext: () => context });
+
+        const result = await decoder.decodeUnit(0, makeAudioResult(4, 10_000_000));
 
         expect(result.startTime).toBeCloseTo(10, 6);
-    });
-
-    it('configures the decoder with the codec, rate, channels and description', async () => {
-        const decoder = new AudioUnitDecoder();
-        await decoder.decodeUnit(0, makeAudioResult(1, { sampleRate: 96000 }));
-
-        expect(FakeAudioDecoder.instances).toHaveLength(1);
-        expect(FakeAudioDecoder.instances[0].config).toMatchObject({
-            codec: 'mp4a.40.2',
-            sampleRate: 96000,
-            numberOfChannels: 2,
-        });
-        expect(FakeAudioDecoder.instances[0].config.description).toBeInstanceOf(Uint8Array);
-    });
-
-    it('reuses one decoder across units with the same config', async () => {
-        const decoder = new AudioUnitDecoder();
-        await decoder.decodeUnit(0, makeAudioResult(1));
-        await decoder.decodeUnit(1, makeAudioResult(1));
-
-        expect(FakeAudioDecoder.instances).toHaveLength(1);
-    });
-
-    it('rebuilds the decoder when the config changes', async () => {
-        const decoder = new AudioUnitDecoder();
-        await decoder.decodeUnit(0, makeAudioResult(1, { sampleRate: 48000 }));
-        await decoder.decodeUnit(1, makeAudioResult(1, { sampleRate: 96000 }));
-
-        expect(FakeAudioDecoder.instances).toHaveLength(2);
+        expect(result.duration).toBeCloseTo(1, 6);
     });
 
     /**
-     * The whole point of placing outputs by timestamp rather than
-     * concatenating them: a gap has to become silence where it belongs. Simply
-     * appending would pull everything after the gap earlier, which puts the
-     * rest of the unit out of sync with the picture -- a much worse failure
-     * than a moment of silence.
+     * The decoder resamples to the context's rate, so what comes back is not
+     * necessarily the media's rate. Reporting the media's would misplace every
+     * sample in the scheduled buffer.
      */
-    it('places a gap in the encoded audio as silence, not as a shift', async () => {
-        const audioResult = makeAudioResult(3);
-        const frameMicros = audioResult.chunks[1].timestamp;
+    it('reports the rate the decoder produced, not the media\'s', async () => {
+        const { context } = makeContext();
+        const decoder = new AudioUnitDecoder({ getContext: () => context });
 
-        // Drop the middle frame's output, leaving a hole between the others.
-        FakeAudioDecoder.outputForChunk = (chunk) =>
-            new FakeAudioData({
-                timestamp: chunk.timestamp === frameMicros ? chunk.timestamp + frameMicros : chunk.timestamp,
-                numberOfFrames: 1024,
-                numberOfChannels: 2,
-                sampleRate: 48000,
-                fill: 1,
-            });
-
-        const result = await new AudioUnitDecoder().decodeUnit(0, audioResult);
-
-        // Three outputs, but the last two both land at the third frame's
-        // position, so the buffer still spans three frames' worth.
-        expect(result.channels[0]).toHaveLength(3 * 1024);
-        expect(result.channels[0][0]).toBe(1);
-        // The hole where the second frame should have been.
-        expect(result.channels[0][1024]).toBe(0);
-        expect(result.channels[0][2048]).toBe(1);
-    });
-
-    it('orders outputs by timestamp regardless of the order they arrive in', async () => {
-        const audioResult = makeAudioResult(2);
-        const timestamps = audioResult.chunks.map((chunk) => chunk.timestamp);
-
-        // Emit them backwards, giving each a distinguishable fill value.
-        let call = 0;
-        FakeAudioDecoder.outputForChunk = () => {
-            const index = 1 - call;
-            call += 1;
-            return new FakeAudioData({
-                timestamp: timestamps[index],
-                numberOfFrames: 1024,
-                numberOfChannels: 2,
-                sampleRate: 48000,
-                fill: index + 1,
-            });
-        };
-
-        const result = await new AudioUnitDecoder().decodeUnit(0, audioResult);
-
-        expect(result.channels[0][0]).toBe(1);
-        expect(result.channels[0][1024]).toBe(2);
-    });
-
-    /**
-     * HE-AAC advertises half its output rate in its own config and then emits
-     * at double it. Trusting the configured value would lay every sample out
-     * at half speed.
-     */
-    it('uses the rate the decoder produced, not the one it was configured with', async () => {
-        FakeAudioDecoder.outputForChunk = (chunk) =>
-            new FakeAudioData({
-                timestamp: chunk.timestamp,
-                numberOfFrames: 2048,
-                numberOfChannels: 2,
-                sampleRate: 48000,
-            });
-
-        const result = await new AudioUnitDecoder().decodeUnit(0, makeAudioResult(1, { sampleRate: 24000 }));
+        const result = await decoder.decodeUnit(0, makeAudioResult(4));
 
         expect(result.sampleRate).toBe(48000);
     });
 
-    it('closes every AudioData it copies out of', async () => {
-        const seen = [];
-        FakeAudioDecoder.outputForChunk = (chunk) => {
-            const data = new FakeAudioData({
-                timestamp: chunk.timestamp,
-                numberOfFrames: 1024,
-                numberOfChannels: 2,
-                sampleRate: 48000,
-            });
-            seen.push(data);
-            return data;
-        };
+    it('returns an empty unit for audio with no frames, without decoding', async () => {
+        const { context, calls } = makeContext();
+        const decoder = new AudioUnitDecoder({ getContext: () => context });
 
-        await new AudioUnitDecoder().decodeUnit(0, makeAudioResult(3));
-
-        expect(seen).toHaveLength(3);
-        expect(seen.every((data) => data.closed)).toBe(true);
-    });
-
-    it('returns an empty buffer for a unit with no audio samples, without configuring', async () => {
-        const decoder = new AudioUnitDecoder();
         const result = await decoder.decodeUnit(7, { ...makeAudioResult(0), chunks: [] });
 
-        expect(result.unitIndex).toBe(7);
-        expect(result.channels).toEqual([]);
+        expect(result.buffer).toBeNull();
         expect(result.duration).toBe(0);
-        expect(FakeAudioDecoder.instances).toHaveLength(0);
+        expect(calls).toHaveLength(0);
     });
 
-    it('rejects when the codec config is unsupported', async () => {
-        FakeAudioDecoder.supported = false;
+    it('rejects when the browser will not decode the stream', async () => {
+        const { context } = makeContext({ reject: true });
+        const decoder = new AudioUnitDecoder({ getContext: () => context });
 
-        await expect(new AudioUnitDecoder().decodeUnit(0, makeAudioResult(1))).rejects.toThrow(
-            /does not support codec config/
-        );
+        await expect(decoder.decodeUnit(0, makeAudioResult(4))).rejects.toThrow(/Unable to decode audio data/);
     });
 
-    it('rejects rather than hanging when the decoder errors without settling flush', async () => {
-        FakeAudioDecoder.simulateError = true;
+    it('rejects when there is no context to decode with', async () => {
+        const decoder = new AudioUnitDecoder({ getContext: () => null });
 
-        await expect(new AudioUnitDecoder().decodeUnit(0, makeAudioResult(1))).rejects.toThrow(
-            /simulated audio decode error/
-        );
+        await expect(decoder.decodeUnit(0, makeAudioResult(4))).rejects.toThrow(/No audio context/);
     });
 
     /**
-     * A decoder that stalls with neither output nor an error would otherwise
-     * leave the audio path waiting forever. It must also be CLOSED on the way
-     * out: a real one keeps processing in the background, and its late output
-     * would arrive through the shared sink and be attributed to whichever unit
-     * decodes next -- the same failure gop-decoder.js documents for video.
+     * A configuration ADTS cannot express has to fail here rather than produce a
+     * stream declaring the wrong rate, which would decode into audio at the
+     * wrong speed instead of failing.
      */
-    it('gives up on a decoder that produces nothing at all, and closes it', async () => {
-        jest.useFakeTimers();
-        FakeAudioDecoder.simulateStall = true;
+    it('rejects audio whose configuration ADTS cannot express', async () => {
+        const { context } = makeContext();
+        const decoder = new AudioUnitDecoder({ getContext: () => context });
 
-        const decoder = new AudioUnitDecoder();
-        const pending = decoder.decodeUnit(2, makeAudioResult(1));
-        const asserted = expect(pending).rejects.toThrow(/produced no output for unit 2/);
+        const audio = makeAudioResult(4);
+        // Frequency index 15: an explicit rate, which ADTS has no field for.
+        audio.description = new Uint8Array([0x17, 0x80, 0x61, 0xa8, 0x10]);
 
-        // The async form, because the watchdog's setTimeout is only created
-        // after `isConfigSupported` has been awaited -- advancing
-        // synchronously would run the clock before the timer exists.
-        await jest.advanceTimersByTimeAsync(10_000);
-        await asserted;
-
-        expect(FakeAudioDecoder.instances[0].state).toBe('closed');
-        jest.useRealTimers();
+        await expect(decoder.decodeUnit(0, audio)).rejects.toThrow(/cannot be framed as ADTS/);
     });
 
     /**
-     * The regression this watchdog was rewritten for. A ten-second GOP carries
-     * over 900 audio frames, and while the picture's own 250 frames are being
-     * decoded and copied out of GPU memory the audio decoder was observed
-     * managing 130 of them in five seconds -- progressing throughout, and
-     * killed anyway by a total-time budget. The unit then went permanently
-     * silent, which is what "audio stops after about five seconds" was.
-     *
-     * A decode that keeps producing output must never be killed, however long
-     * it takes in total.
+     * Concurrent decodes would compete for exactly the resource this whole
+     * design exists to stop competing for.
      */
-    it('never gives up on a decoder that is merely slow', async () => {
-        jest.useFakeTimers();
-        // Eight seconds between outputs: comfortably inside the no-progress
-        // window, and far beyond any total budget across three of them.
-        FakeAudioDecoder.slowOutputMs = 8000;
+    it('serialises concurrent decodes', async () => {
+        let inFlight = 0;
+        let overlapped = false;
+        const context = {
+            sampleRate: 48000,
+            async decodeAudioData() {
+                inFlight += 1;
+                if (inFlight > 1) {
+                    overlapped = true;
+                }
+                await Promise.resolve();
+                inFlight -= 1;
+                return { duration: 1, sampleRate: 48000, numberOfChannels: 2 };
+            },
+        };
+        const decoder = new AudioUnitDecoder({ getContext: () => context });
 
-        const decoder = new AudioUnitDecoder();
-        const pending = decoder.decodeUnit(1, makeAudioResult(3));
-
-        await jest.advanceTimersByTimeAsync(30_000);
-        const result = await pending;
-
-        expect(result.channels[0]).toHaveLength(3 * 1024);
-        expect(FakeAudioDecoder.instances[0].state).toBe('configured');
-        jest.useRealTimers();
-    });
-
-    it('marks a no-output failure as worth another attempt', async () => {
-        jest.useFakeTimers();
-        FakeAudioDecoder.simulateStall = true;
-
-        const pending = new AudioUnitDecoder().decodeUnit(0, makeAudioResult(1));
-        const asserted = expect(pending).rejects.toMatchObject({ stalled: true });
-
-        await jest.advanceTimersByTimeAsync(10_000);
-        await asserted;
-        jest.useRealTimers();
-    });
-
-    it('builds a fresh decoder for the next unit after a failure', async () => {
-        FakeAudioDecoder.simulateError = true;
-        const decoder = new AudioUnitDecoder();
-        await expect(decoder.decodeUnit(0, makeAudioResult(1))).rejects.toThrow();
-
-        FakeAudioDecoder.simulateError = false;
-        await decoder.decodeUnit(1, makeAudioResult(1));
-
-        expect(FakeAudioDecoder.instances).toHaveLength(2);
-        expect(FakeAudioDecoder.instances[1].state).toBe('configured');
-    });
-
-    /**
-     * One decoder means decodes must not interleave: two units in flight at
-     * once would mix their outputs through the shared sink.
-     */
-    it('serializes concurrent decodes rather than running them together', async () => {
-        const decoder = new AudioUnitDecoder();
-
-        const results = await Promise.all([
-            decoder.decodeUnit(0, makeAudioResult(2)),
-            decoder.decodeUnit(1, makeAudioResult(3)),
+        await Promise.all([
+            decoder.decodeUnit(0, makeAudioResult(4)),
+            decoder.decodeUnit(1, makeAudioResult(4)),
+            decoder.decodeUnit(2, makeAudioResult(4)),
         ]);
 
-        expect(results[0].channels[0]).toHaveLength(2 * 1024);
-        expect(results[1].channels[0]).toHaveLength(3 * 1024);
+        expect(overlapped).toBe(false);
     });
 
-    it('closes the underlying decoder on close()', async () => {
-        const decoder = new AudioUnitDecoder();
-        await decoder.decodeUnit(0, makeAudioResult(1));
+    it('keeps decoding later units after one fails', async () => {
+        let first = true;
+        const context = {
+            sampleRate: 48000,
+            async decodeAudioData() {
+                if (first) {
+                    first = false;
+                    throw new Error('Unable to decode audio data');
+                }
+                return { duration: 1, sampleRate: 48000, numberOfChannels: 2 };
+            },
+        };
+        const decoder = new AudioUnitDecoder({ getContext: () => context });
 
-        decoder.close();
-
-        expect(FakeAudioDecoder.instances[0].state).toBe('closed');
+        await expect(decoder.decodeUnit(0, makeAudioResult(4))).rejects.toThrow();
+        await expect(decoder.decodeUnit(1, makeAudioResult(4))).resolves.toMatchObject({ unitIndex: 1 });
     });
 });

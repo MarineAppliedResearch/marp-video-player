@@ -49,7 +49,7 @@ function build({ fetchedUnits = [0, 1, 2], overrides = {} } = {}) {
             numberOfChannels: 2,
             startTime: unitIndex,
             duration: 1,
-            channels: [new Float32Array(48000), new Float32Array(48000)],
+            buffer: { duration: 1, sampleRate: 48000, numberOfChannels: 2 },
         })),
         close: jest.fn(),
         ...overrides.audioDecoder,
@@ -187,7 +187,7 @@ describe('AudioStore', () => {
             if (calls === 1) {
                 throw new Error('AudioDecoder produced no output');
             }
-            return { unitIndex, sampleRate: 48000, numberOfChannels: 2, startTime: 0, duration: 1, channels: [new Float32Array(1)] };
+            return { unitIndex, sampleRate: 48000, numberOfChannels: 2, startTime: 0, duration: 1, buffer: { duration: 1 } };
         });
 
         store.request(0);
@@ -250,7 +250,7 @@ describe('AudioStore', () => {
         await settle();
 
         expect(store.get(0)).not.toBeNull();
-        expect(store.get(0).channels).toEqual([]);
+        expect(store.get(0).buffer).toBeNull();
         expect(audioDecoder.decodeUnit).not.toHaveBeenCalled();
     });
 
@@ -292,7 +292,7 @@ describe('AudioStore', () => {
             if (unitIndex === 0) {
                 throw new Error('bad audio');
             }
-            return { unitIndex, sampleRate: 48000, numberOfChannels: 2, startTime: 0, duration: 1, channels: [new Float32Array(1)] };
+            return { unitIndex, sampleRate: 48000, numberOfChannels: 2, startTime: 0, duration: 1, buffer: { duration: 1 } };
         });
 
         // Twice, so unit 0 exhausts its attempts and is given up on for good.

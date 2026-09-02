@@ -149,6 +149,7 @@ export function readAudioTrackConfig(isoFile, track) {
     }
 
     const description = audioDescriptionBytes(isoFile, track.id);
+    const descriptionBox = audioDescriptionBox(isoFile, track.id);
     const fromAsc = parseAudioSpecificConfig(description);
 
     // AAC in MP4 cannot be configured without its AudioSpecificConfig. Codecs
@@ -167,8 +168,36 @@ export function readAudioTrackConfig(isoFile, track) {
     return {
         codec: track.codec,
         description,
+        // The parsed box, not just its payload. Muxing audio back out for
+        // MediaSource reuses this verbatim as the new track's description
+        // box, which is what makes the muxed codec string agree with the
+        // media's own -- see audio-mux.js.
+        descriptionBox,
         sampleRate,
         numberOfChannels,
         language: track.language,
     };
+}
+
+/**
+ * The audio track's whole sample-description box, for handing back to a muxer.
+ *
+ * @param {Object} isoFile - mp4box ISOFile, after onReady.
+ * @param {number} trackId - Audio track id.
+ * @returns {?Object} The parsed `esds` box, or null if absent.
+ */
+export function audioDescriptionBox(isoFile, trackId) {
+    const trak = isoFile.getTrackById(trackId);
+
+    if (!trak || !trak.mdia || !trak.mdia.minf || !trak.mdia.minf.stbl) {
+        return null;
+    }
+
+    for (const entry of trak.mdia.minf.stbl.stsd.entries) {
+        if (entry.esds) {
+            return entry.esds;
+        }
+    }
+
+    return null;
 }
