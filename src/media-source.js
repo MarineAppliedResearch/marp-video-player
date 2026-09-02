@@ -64,6 +64,46 @@ export class MediaSource {
         return undefined;
     }
 
+    /**
+     * Whether this source can supply audio for the media it is playing.
+     *
+     * False here, so a source that knows nothing about audio -- including one
+     * written by a consumer of this package -- reports "no audio" rather than
+     * failing when the engine asks. Media genuinely without an audio track
+     * reports false too, and both cases behave identically: the engine builds
+     * no audio path at all.
+     *
+     * @returns {boolean} True if {@link MediaSource#fetchAudioChunks} will produce audio.
+     */
+    hasAudio() {
+        return false;
+    }
+
+    /**
+     * Describes the audio this source supplies, for AudioDecoder.configure().
+     *
+     * @returns {?{codec: string, description: (Uint8Array|null), sampleRate: number, numberOfChannels: number, language: (string|undefined)}} Decoder configuration, or null when there is no audio.
+     */
+    getAudioConfig() {
+        return null;
+    }
+
+    /**
+     * Assembles one unit's audio chunks, the counterpart of `fetchChunks`.
+     *
+     * Units are the same units the video uses, so a caller needs no separate
+     * index. `timelineOffsetMicros` is what must be added to a chunk's own
+     * timestamp to place it on the playlist timeline the engine works in --
+     * zero wherever sample timestamps already are that timeline.
+     *
+     * @async
+     * @param {number} unitIndex - Index of the unit to assemble.
+     * @returns {Promise<?{codec: string, description: (Uint8Array|null), sampleRate: number, numberOfChannels: number, chunks: Array<Object>, timelineOffsetMicros: number}>} Decoder-ready chunks, or null when there is no audio.
+     */
+    async fetchAudioChunks(unitIndex) {
+        return null;
+    }
+
     /** @param {string} itemId @param {Object} context @returns {Promise<void>} */
     async reportPlaybackStarted(itemId, context) {}
 

@@ -66,6 +66,7 @@ of seeks.
 | **True reverse playback** | Negative playback rates, decoded properly rather than simulated by seeking |
 | **Frame stepping** | Forward and back with no cumulative drift |
 | **Variable speed** | Without timing artefacts |
+| **Synchronized audio** | Decoded alongside the picture, timed by the video clock, with volume and mute |
 | **Multiple sources** | Local files, plain URLs, and Jellyfin by transcode or Direct Play |
 | **Native host embedding** | A message bridge for WebView2 and similar hosts |
 | **One file** | The bundle carries the engine, interface, stylesheet, and logo |
@@ -198,6 +199,40 @@ exactly which build it loaded.
 
 Generate the full reference with `npm run docs`.
 
+## Audio
+
+Audio is decoded by the browser and scheduled against the video's clock. It
+costs no extra requests and no extra bytes: on the byte-range paths a unit's
+audio lives inside the same bytes its video was fetched with, and on the
+Jellyfin transcode path it is already inside the same segments.
+
+Deliberately *not* decoded through WebCodecs the way the video is. Doing that
+puts the audio decoder behind the video decoder in the platform's media
+pipeline, and one second of audio was measured taking ~4400 ms that way against
+36-78 ms through the browser's own decoder. A late video frame is a freeze; a
+late audio sample is silence for ever.
+
+| | |
+| --- | --- |
+| `volume` | 0 to 1, independent of `muted`, exactly like `HTMLMediaElement` |
+| `muted` | Silences without stopping, so unmuting picks up in sync |
+| `hasAudio` | Whether the loaded media has a track that can be played |
+| `audioBlocked` | The browser is withholding sound until the page is interacted with |
+| `resumeAudio()` | Call from a gesture handler to lift that block |
+| `volumechange` | Fires when any of the above changes |
+
+**There is one clock.** The video's position decides where playback is, and
+audio is scheduled against it -- never the reverse. Audio can be late, silent or
+absent without the picture moving by a frame.
+
+Audio plays forward between **0.5x and 2.5x**, shifting pitch with the rate, and
+is silent outside that band and in reverse. Reverse audio is not meaningful the
+way reverse video is, and past 2.5x a pitch-shifted track is not worth hearing.
+
+Media with no audio track plays exactly as it did before any of this existed:
+no audio path is built, no output device is opened, and the volume controls are
+hidden rather than shown doing nothing.
+
 ## Browser support
 
 Requires WebCodecs: **Chrome and Edge 94+**. Firefox and Safari do not yet ship the APIs this depends on.
@@ -210,7 +245,7 @@ Requires WebCodecs: **Chrome and Edge 94+**. Firefox and Safari do not yet ship 
 npm install
 npm run build        # ESM, IIFE, and standalone bundles into dist/
 npm run serve        # static server on port 8099
-npm test             # 140 unit tests, no dependencies
+npm test             # 280 unit tests, no dependencies
 npm run docs         # JSDoc reference into docs/generated/
 ```
 
@@ -223,8 +258,8 @@ Open the folder and use **Run and Debug** (<kbd>F5</kbd>):
 | Configuration | What it does |
 | --- | --- |
 | Open player in browser | Rebuilds, starts the server, opens the player |
-| Run unit tests | 140 tests, no dependencies |
-| Run browser tests | 28 tests in a real browser |
+| Run unit tests | 280 tests, no dependencies |
+| Run browser tests | 50 tests in a real browser |
 | Build library | The three bundles into `dist/` |
 | Build docs | JSDoc reference into `docs/generated/` |
 

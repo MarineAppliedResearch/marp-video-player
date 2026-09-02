@@ -19,6 +19,12 @@ import { FrameStore } from './frame-store.js';
 import { Scheduler } from './scheduler.js';
 import { CanvasRenderer } from './canvas-renderer.js';
 import { MarpVideoShim } from './marp-video-shim.js';
+import { AudioUnitDecoder } from './audio-decoder.js';
+import { AudioStore } from './audio-store.js';
+import { AudioOutput } from './audio-output.js';
+
+
+
 
 /**
  * Creates a frame-accurate bidirectional playback engine over a Jellyfin
@@ -176,6 +182,61 @@ export async function createMarpVideoEngine(canvas, options) {
         },
     });
 
+    // Audio, when the source has any. A source that predates this (or one
+    // written by a consumer of this package) has no such method, and media with
+    // no usable audio track answers false -- both mean the same thing here: no
+    // audio path is built at all.
+    //
+    // Decoded by the browser rather than by WebCodecs. Audio decoded the way
+    // the video is decoded ends up queued behind it, and the gap that produces
+    // is silence that can never be played late -- see audio-decoder.js and
+    // issue #6.
+    if (typeof mediaSource.hasAudio === 'function' && mediaSource.hasAudio()) {
+        const forwardDebug = (message) => {
+            if (shim) {
+                shim._dispatch('debug', { message });
+            }
+        };
+
+        // Declared first so the decoder's context accessor can close over it;
+        // it is only ever called once everything below exists.
+        let audioOutput = null;
+
+        const audioStore = new AudioStore({
+            mediaSource,
+            segmentFetcher,
+            audioDecoder: new AudioUnitDecoder({
+                getContext: () => (audioOutput ? audioOutput.ensureContext() : null),
+            }),
+            onDebug: forwardDebug,
+        });
+
+        audioOutput = new AudioOutput({
+            segmentIndex,
+            store: audioStore,
+            // The clock, and the only one. The continuous position rather than
+            // the presented frame: the latter advances in whole frames, and
+            // comparing a continuous schedule against it reads a frame of
+            // quantisation as drift.
+            getPlayheadTime: () => scheduler.playbackPosition,
+            onDebug: forwardDebug,
+            // Fires when the browser starts or stops withholding sound, so a
+            // consumer's mute button can show that rather than looking broken.
+            onStateChange: () => {
+                if (shim) {
+                    shim._dispatch('volumechange', { volume: shim.volume, muted: shim.muted });
+                }
+            },
+        });
+
+        // Scheduled the instant a unit decodes rather than at the next poll: the
+        // first unit is what a listener hears as the start.
+        audioStore.onUnitReady = () => audioOutput.onUnitReady();
+
+        scheduler.setAudioOutput(audioOutput);
+        console.log('[video-engine] audio track available');
+    }
+
     shim = new MarpVideoShim(scheduler, { videoWidth, videoHeight, fps });
 
     // Sources are usually built before the engine exists, so anything they
@@ -201,6 +262,7 @@ export async function createMarpVideoEngine(canvas, options) {
             mediaSource.stopPlaybackReporting();
         }
         closeShim();
+
     };
     // Prime the first displayed frame and fire the initial metadata
     // events, matching a real <video> element's loadedmetadata/

@@ -20,7 +20,7 @@
  */
 
 import { createMarpVideoEngine } from './engine.js';
-import { createMarpVideoPlayer, MarpVideoPlayer, SPEED_KEYMAP } from './ui/player-ui.js';
+import { createMarpVideoPlayer, MarpVideoPlayer, SPEED_KEYMAP, SPEED_STEP, SPEED_STEP_LIMIT } from './ui/player-ui.js';
 import { JellyfinTranscodeMediaSource, JellyfinMediaSource } from './media-source-jellyfin-transcode.js';
 import { JellyfinDirectPlayMediaSource } from './media-source-jellyfin-directplay.js';
 import { LocalFileMediaSource } from './media-source-local.js';
@@ -50,6 +50,8 @@ export {
     createMarpVideoPlayer,
     MarpVideoPlayer,
     SPEED_KEYMAP,
+    SPEED_STEP,
+    SPEED_STEP_LIMIT,
     createMarpVideoEngine,
     attachWebView2Bridge,
     JellyfinClient,

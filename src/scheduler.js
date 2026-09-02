@@ -182,7 +182,53 @@ export class Scheduler {
         // plain boolean.
         this._bufferState = null;
 
+        // Set by the engine once it exists, and null when the media has no
+        // audio. The scheduler drives it and never reads playback state back
+        // out of it: this clock is the only clock, and audio is told where it
+        // is rather than asked. See audio-output.js's module comment.
+        this.audioOutput = null;
+
         canvasRenderer.onFramePresented(() => this._dispatchFrameCallbacks());
+    }
+
+    /**
+     * Attaches an audio output for this scheduler to drive.
+     *
+     * Set after construction rather than passed in, because an AudioOutput
+     * reads the playhead from the scheduler it belongs to -- one of them has
+     * to exist first, and it is this one.
+     *
+     * @param {?Object} audioOutput - {@link module:video-engine/audio-output.AudioOutput} instance, or null for media with no audio.
+     * @returns {void}
+     */
+    setAudioOutput(audioOutput) {
+        this.audioOutput = audioOutput;
+    }
+
+    /**
+     * Brings audio into line with the current playback state.
+     *
+     * Audio plays only when the picture is genuinely moving: playing, not
+     * mid-seek, and not blocked on fetch or decode. Everything else stops it,
+     * including a playback rate outside the audible band, which
+     * {@link module:video-engine/audio-output.AudioOutput#start} treats as an
+     * ordinary request to be silent rather than as an error.
+     *
+     * Only ever called on a state transition. Calling it while audio is
+     * already running restarts it, which is audible.
+     *
+     * @returns {void}
+     */
+    _syncAudio() {
+        if (!this.audioOutput) {
+            return;
+        }
+
+        if (this.playing && !this.seekingFlag && this._bufferState === null) {
+            this.audioOutput.start(this.currentTime, this.playbackRate);
+        } else {
+            this.audioOutput.stop();
+        }
     }
 
     /** @returns {number} Total stream duration, in seconds. */
@@ -238,6 +284,33 @@ export class Scheduler {
             return this._pausedFreezeTime;
         }
         return this._presentedMediaTime;
+    }
+
+    /**
+     * Where playback is *aiming*, continuously, rather than which frame is on
+     * screen.
+     *
+     * The same value `_tick` computes its target from, so it is the render
+     * loop's own intent and not a second clock. It exists because
+     * `currentTime` reports the presented frame, which advances in whole
+     * frames -- 40ms steps at 25fps -- and anything comparing itself against a
+     * continuous schedule therefore sees up to a frame of disagreement that is
+     * not error. Measured against audio it produced repeated resyncs of
+     * 50-120ms on ordinary playback, each one an audible discontinuity, over a
+     * mismatch that did not exist.
+     *
+     * Only meaningful while genuinely playing; falls back to the presented
+     * frame otherwise.
+     *
+     * @returns {number} Intended playback position, in seconds.
+     */
+    get playbackPosition() {
+        if (!this.playing || this.seekingFlag) {
+            return this.currentTime;
+        }
+
+        const elapsedSeconds = (performance.now() - this._anchorWallClockMs) / 1000;
+        return Math.max(0, Math.min(this.duration, this._anchorTime + elapsedSeconds * this.playbackRate));
     }
 
     /**
@@ -440,6 +513,7 @@ export class Scheduler {
         this._anchorTime = this.currentTime;
         this._pausedFreezeTime = null;
         this.emit('playing');
+        this._syncAudio();
         this._scheduleTick();
     }
 
@@ -466,6 +540,7 @@ export class Scheduler {
         this._runCachePass(this.currentTime, { symmetric: true });
         this._startPausedFillWorker();
 
+        this._syncAudio();
         this.emit('pause');
     }
 
@@ -520,6 +595,13 @@ export class Scheduler {
         this.playbackRate = rate;
         if (rate !== 0) {
             this._lastDirectionSign = rate >= 0 ? 1 : -1;
+        }
+
+        // Audio cannot follow a rate change in place: every buffer already
+        // scheduled was placed on the old mapping from media time to context
+        // time. It restarts on the new mapping, from where the picture is now.
+        if (this.playing) {
+            this._syncAudio();
         }
     }
 
@@ -703,6 +785,13 @@ export class Scheduler {
             return;
         }
         this._bufferState = state;
+
+        // A stall freezes the picture while the wall clock keeps running, so
+        // audio carrying on would be playing against a frame that is no
+        // longer current. It stops, and starts again wherever the picture
+        // resumes.
+        this._syncAudio();
+
         if (state) {
             this.emit('waiting', { reason: state });
         } else {
@@ -999,6 +1088,7 @@ export class Scheduler {
         this._stopPausedFillWorker();
 
         this.seekingFlag = true;
+        this._syncAudio();
 
         const direction = clamped >= this.currentTime ? 'atOrBefore' : 'atOrAfter';
         const segment = findSegmentForTime(this.segmentIndex, clamped);
@@ -1123,6 +1213,8 @@ export class Scheduler {
         }
 
         this.seekingFlag = false;
+        this._syncAudio();
+
         // Carries exactly where this seek actually landed -- the target
         // time requested can differ from the presented time (frame
         // granularity, direction rounding), which is exactly the kind of
@@ -1159,6 +1251,10 @@ export class Scheduler {
             this._rafHandle = null;
         }
         this._stopPausedFillWorker();
+        if (this.audioOutput) {
+            this.audioOutput.close();
+            this.audioOutput = null;
+        }
         this.frameStore.segmentFetcher.preemptInFlightFetches([]);
         this.frameStore.close();
     }

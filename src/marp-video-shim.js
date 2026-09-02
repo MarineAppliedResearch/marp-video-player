@@ -32,15 +32,13 @@ export class MarpVideoShim {
         this.videoWidth = videoWidth;
         this.videoHeight = videoHeight;
         this.fps = fps;
-        this.volume = 1;
-        this.muted = false;
-
-        // Audio decode/playback isn't implemented yet (planned as its own
-        // later phase: plain playback at 1x forward, muted at any other
-        // rate, since reverse/time-shifted audio isn't meaningful the way
-        // reverse video is) -- these exist only so C#'s
-        // `window.marpVideo.volume = ...; window.marpVideo.muted = ...;`
-        // calls don't throw in the meantime. Otherwise inert until then.
+        // Audio state lives here rather than on the AudioOutput, because it
+        // must be readable and writable whether or not there is any audio to
+        // apply it to: the WebView2 host sets volume on every load, and media
+        // with no audio track has no output for it to reach. See the volume
+        // and muted accessors below.
+        this._volume = 1;
+        this._muted = false;
 
         // Simplified: the shim is only ever constructed once the first
         // segment is already decoded and displayed, so it's always
@@ -71,6 +69,91 @@ export class MarpVideoShim {
      */
     getSegmentStates() {
         return this._scheduler.getSegmentStates();
+    }
+
+    /** @returns {number} Playback volume, 0 to 1. Independent of `muted`, the way HTMLMediaElement's is. */
+    get volume() {
+        return this._volume;
+    }
+
+    /** @param {number} value - New volume, clamped to 0..1. */
+    set volume(value) {
+        const clamped = Math.max(0, Math.min(1, Number(value)));
+
+        if (!Number.isFinite(clamped) || clamped === this._volume) {
+            return;
+        }
+
+        this._volume = clamped;
+        if (this._scheduler.audioOutput) {
+            this._scheduler.audioOutput.volume = clamped;
+        }
+        this._dispatch('volumechange', { volume: this._volume, muted: this._muted });
+    }
+
+    /** @returns {boolean} Whether audio is muted. Remembers `volume` across a mute, the way HTMLMediaElement does. */
+    get muted() {
+        return this._muted;
+    }
+
+    /** @param {boolean} value - New mute state. */
+    set muted(value) {
+        const next = Boolean(value);
+
+        if (next === this._muted) {
+            return;
+        }
+
+        this._muted = next;
+        if (this._scheduler.audioOutput) {
+            this._scheduler.audioOutput.muted = next;
+        }
+        this._dispatch('volumechange', { volume: this._volume, muted: this._muted });
+    }
+
+    /**
+     * Whether the loaded media has an audio track this engine can play.
+     *
+     * Not an HTMLMediaElement property, and needed because this engine
+     * decides at load time whether to build an audio path at all -- a
+     * consumer drawing its own controls uses this to decide whether a volume
+     * control means anything for the current item.
+     *
+     * @returns {boolean} True when there is audio.
+     */
+    get hasAudio() {
+        return Boolean(this._scheduler.audioOutput);
+    }
+
+    /**
+     * Whether the browser is withholding sound until someone interacts with
+     * the page.
+     *
+     * The autoplay policy starts an AudioContext suspended, and a page may
+     * not make sound before a real user gesture. The picture is unaffected.
+     * Call {@link MarpVideoShim#resumeAudio} from a gesture handler to lift
+     * it. In a WebView2 host where playback is driven from native code there
+     * may be no gesture at all, which is what the host's
+     * `--autoplay-policy=no-user-gesture-required` browser argument is for.
+     *
+     * @returns {boolean} True while sound is blocked.
+     */
+    get audioBlocked() {
+        return Boolean(this._scheduler.audioOutput && this._scheduler.audioOutput.blocked);
+    }
+
+    /**
+     * Asks the browser to let this page make sound. Safe to call at any time,
+     * and only meaningful from inside a user-gesture handler.
+     *
+     * @async
+     * @returns {Promise<boolean>} True if sound is available afterwards.
+     */
+    async resumeAudio() {
+        if (!this._scheduler.audioOutput) {
+            return false;
+        }
+        return this._scheduler.audioOutput.resume();
     }
 
     /** @returns {boolean} True if playback is paused. */
@@ -136,7 +219,11 @@ export class MarpVideoShim {
     /**
      * Registers an event listener. Supported types: loadedmetadata,
      * durationchange, resize, error, playing, canplay, pause, seeking,
-     * seeked, waiting, debug.
+     * seeked, waiting, volumechange, debug.
+     *
+     * `volumechange` carries `{volume, muted}` and fires both when either is
+     * written and when the browser's willingness to make sound changes, so a
+     * listener re-reads `audioBlocked` from it too.
      *
      * `waiting` fires (with `{reason: 'fetching'|'decoding'}`) whenever
      * playback or an in-flight seek is blocked on Tier 1 (raw fetch) or

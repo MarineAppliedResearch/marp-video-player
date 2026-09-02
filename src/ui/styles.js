@@ -326,6 +326,37 @@ export const PLAYER_CSS = `
     flex: 1;
 }
 
+/* --- Volume: the mute button and its slider move together, and the whole
+   group is hidden for media with no audio track rather than shown disabled.
+   A control that can never do anything is worse than an absent one. --- */
+.marp-player .marp-volume {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.marp-player .marp-volume.marp-hidden {
+    display: none;
+}
+
+.marp-player .marp-volume-slider {
+    width: 72px;
+    accent-color: var(--cyan-300);
+    cursor: pointer;
+}
+
+.marp-player .marp-volume-slider:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+/* The browser is withholding sound until someone interacts with the page.
+   Dimmed rather than hidden: the control still works, and its tooltip says
+   what is going on. */
+.marp-player .marp-mute.marp-audio-blocked {
+    color: var(--amber-300, #f6c453);
+}
+
 .marp-player .marp-settings-anchor {
     position: relative;
 }

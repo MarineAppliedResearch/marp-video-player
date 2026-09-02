@@ -196,9 +196,12 @@ h("hStepBack").addEventListener("click", () => {
     player.currentTime = Math.max(0, player.currentTime - 1 / player.fps);
 });
 h("hMute").addEventListener("click", () => {
-    // Inert until audio lands, but wired the way a host would.
     player.muted = !player.muted;
     report("muted", player.muted);
+});
+h("hVolume").addEventListener("input", (event) => {
+    player.volume = Number(event.target.value);
+    report("volume", player.volume);
 });
 h("hFullscreen").addEventListener("click", () => player.toggleFullscreen());
 
@@ -482,9 +485,21 @@ function nudge(seconds) {
     player.currentTime = Math.min(player.duration, Math.max(0, player.currentTime + seconds));
 }
 
+/**
+ * The arrow keys shuttle the playback rate in half steps, and that lives in
+ * the library rather than here -- same reason the speed keys come from its own
+ * SPEED_KEYMAP: this page must not be able to disagree with the player about
+ * what a key does. Frame stepping moved to , and . accordingly.
+ */
+function stepPlaybackSpeed(direction) {
+    player.stepPlaybackRate(direction);
+}
+
 /** Steps exactly one frame. */
+// Both from the library, so this page cannot disagree with the player about
+// what a key does -- same reason the speed keys come from its own SPEED_KEYMAP.
 function stepFrame(direction) {
-    nudge(direction / player.fps);
+    player.stepFrame(direction);
 }
 
 /**
@@ -493,8 +508,10 @@ function stepFrame(direction) {
  */
 const HARNESS_KEYMAP = {
     " ": { label: "space  play/pause", run: () => (player.paused ? player.play() : player.pause()) },
-    ArrowLeft: { label: "left/right  step 1 frame", run: () => stepFrame(-1) },
-    ArrowRight: { label: "", run: () => stepFrame(1) },
+    ArrowLeft: { label: "left/right  -/+0.5x speed", run: () => stepPlaybackSpeed(-1) },
+    ArrowRight: { label: "", run: () => stepPlaybackSpeed(1) },
+    a: { label: "a / s  step 1 frame back/forward", run: () => stepFrame(-1) },
+    s: { label: "", run: () => stepFrame(1) },
     "Shift+ArrowLeft": { label: "shift+left/right  -/+1s", run: () => nudge(-1) },
     "Shift+ArrowRight": { label: "", run: () => nudge(1) },
     Home: { label: "home/end  start/end", run: () => { player.currentTime = 0; } },
@@ -519,12 +536,40 @@ for (const [key, rate] of Object.entries(MarpVideoEngine.SPEED_KEYMAP)) {
 }
 
 /**
- * True when the event came from a form field, where keys must be left
- * alone -- the panel is full of text inputs, and space belongs to them.
+ * True when the event came from a field where the keystroke belongs to the
+ * field rather than to playback -- the panel is full of text inputs, and space
+ * belongs to them.
+ *
+ * Deliberately narrowed to inputs that TAKE TEXT. Treating every <input> as a
+ * typing field meant that clicking the volume slider -- an <input type="range">,
+ * which keeps focus after a click -- silently killed every shortcut on this
+ * page: arrows, the speed keys, and space, all at once, until something else
+ * was focused. Range, checkbox, radio and button inputs have no text to type
+ * into and must not capture playback keys.
  */
+const TEXT_ENTRY_INPUT_TYPES = new Set([
+    "text", "password", "search", "email", "url", "tel", "number",
+    "date", "datetime-local", "month", "time", "week",
+]);
+
 function typingInField(target) {
-    const tag = target && target.tagName;
-    return tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || (target && target.isContentEditable);
+    if (!target) {
+        return false;
+    }
+    if (target.isContentEditable) {
+        return true;
+    }
+
+    const tag = target.tagName;
+    if (tag === "SELECT" || tag === "TEXTAREA") {
+        return true;
+    }
+    if (tag !== "INPUT") {
+        return false;
+    }
+
+    // An <input> with no type attribute is a text field.
+    return TEXT_ENTRY_INPUT_TYPES.has((target.getAttribute("type") || "text").toLowerCase());
 }
 
 document.addEventListener("keydown", (event) => {

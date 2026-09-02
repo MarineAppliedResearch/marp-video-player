@@ -114,6 +114,13 @@
                     segmentIntervalMs: numberParam('segmentIntervalMs'),
                     jellyfin: server && token ? { serverUrl: server, accessToken: token, userId: user } : undefined,
                     defaultItemId: params.get('item') || '',
+                    // Audible at full volume unless the host says otherwise.
+                    // A host that drives volume through
+                    // window.marpVideo.volume needs neither of these; they
+                    // exist so an initial state can be set before the first
+                    // frame, without a script injection round trip.
+                    volume: params.get('volume') === null ? undefined : Number(params.get('volume')),
+                    muted: params.get('muted') === '1',
                     rawCacheGiB: numberParam('rawCacheBytes') ? numberParam('rawCacheBytes') / (1024 * 1024 * 1024) : undefined,
                     decodedCacheGiB: numberParam('decodedCacheBytes') ? numberParam('decodedCacheBytes') / (1024 * 1024 * 1024) : undefined,
                     // Both names, and the host's message channel: marpVideo is

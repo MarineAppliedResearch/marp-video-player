@@ -164,7 +164,10 @@ export function buildPlayerMarkup(options = {}) {
 ${advancedSection}
                     </div>
                 </div>
-                <button id="muteButton" class="marp-mute" type="button" disabled>&#128266;</button>
+                <div id="volumeGroup" class="marp-volume">
+                    <button id="muteButton" class="marp-mute" type="button" disabled>&#128266;</button>
+                    <input id="volumeSlider" class="marp-volume-slider" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume" disabled>
+                </div>
                 <button id="fullscreenButton" class="marp-fullscreen" type="button" disabled>&#9974;</button>
             </div>
         </div>`;

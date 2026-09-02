@@ -52,6 +52,19 @@ export const SPEED_KEYMAP = {
     '\\': 16,
 };
 
+/**
+ * Shuttle step for the arrow keys, and the rate it will not step beyond.
+ *
+ * Matches PlaybackStepSize and PlaybackStepLimit in VIDEO_PROCESSING_GUI's
+ * VideoPlayer.xaml.cs. The desktop application had this behaviour first and
+ * implemented it in C# against the player; it lives here now so a host does
+ * not have to, and so the two cannot disagree about what an arrow key does.
+ */
+export const SPEED_STEP = 0.5;
+
+/** @constant @type {number} */
+export const SPEED_STEP_LIMIT = 16;
+
 /** How long the controls bar stays visible after the pointer stops moving during playback, in ms. */
 const CONTROLS_IDLE_HIDE_MS = 2500;
 
@@ -153,6 +166,8 @@ export class MarpVideoPlayer {
      * @param {boolean} [options.segmentUpdates] - With webview2Bridge, also post segmentindex|/segments| so a host can draw its own scrub bar shading. Default false.
      * @param {number} [options.segmentIntervalMs] - How often segments| is posted. Default 250.
      * @param {boolean} [options.exposeGlobals] - Assign each loaded engine to window.marpVideo and window.mareVideo. Default false.
+     * @param {number} [options.volume] - Initial volume, 0 to 1. Default 1.
+     * @param {boolean} [options.muted] - Start muted. Default false.
      * @param {number} [options.rawCacheGiB] - Initial raw-cache budget shown in Advanced. Default 3.
      * @param {number} [options.decodedCacheGiB] - Initial decoded-cache budget shown in Advanced. Default 5.
      * @param {Function} [options.onLog] - Receives every log line, in addition to the console.
@@ -169,6 +184,15 @@ export class MarpVideoPlayer {
 
         /** The currently loaded engine (a MarpVideoShim), or null before the first load. */
         this.engine = null;
+
+        // Volume lives on the player rather than on the engine, because
+        // loading an item or changing quality replaces the engine entirely
+        // and the delegating properties below would hand the replacement its
+        // own defaults -- silently resetting the volume on every reload.
+        // Audible at full volume by default, the way a browser video player
+        // behaves; a host that wants otherwise sets it on load.
+        this._volume = Number.isFinite(options.volume) ? Math.max(0, Math.min(1, options.volume)) : 1;
+        this._muted = Boolean(options.muted);
 
         this.currentItemId = null;
         this.currentQualityOption = null;
@@ -202,6 +226,10 @@ export class MarpVideoPlayer {
 
         this.updateLoginStatus();
         this._applyPrefill();
+        // Before any load, so a player constructed with `volume` or `muted`
+        // shows that state rather than the markup's own defaults while it
+        // waits for something to play.
+        this._syncVolumeUi();
 
         if (options.itemId) {
             this.loadItem(options.itemId, null);
@@ -281,6 +309,8 @@ export class MarpVideoPlayer {
             settingsButton: root.querySelector('.marp-settings-button'),
             settingsMenu: root.querySelector('.marp-settings-menu'),
             mute: root.querySelector('.marp-mute'),
+            volumeGroup: root.querySelector('.marp-volume'),
+            volumeSlider: root.querySelector('.marp-volume-slider'),
             fullscreen: root.querySelector('.marp-fullscreen'),
             serverUrl: root.querySelector('.marp-server-url'),
             username: root.querySelector('.marp-username'),
@@ -471,6 +501,7 @@ export class MarpVideoPlayer {
         this.segmentShadingHandle = setInterval(() => this.updateSegmentShading(), SEGMENT_SHADING_INTERVAL_MS);
 
         this._enableTransportControls();
+        this._applyAudioState();
         this.syncCacheSettingsFromEngine();
 
         if (this.options.exposeGlobals) {
@@ -694,6 +725,121 @@ export class MarpVideoPlayer {
         return this.probeSource.probeQualityOptions(itemId);
     }
 
+    /** @returns {number} Playback volume, 0 to 1. Survives an item or quality change. */
+    get volume() {
+        return this._volume;
+    }
+
+    /** @param {number} value - New volume, clamped to 0..1. */
+    set volume(value) {
+        this._setVolume(value);
+    }
+
+    /** @returns {boolean} Whether audio is muted. Survives an item or quality change. */
+    get muted() {
+        return this._muted;
+    }
+
+    /** @param {boolean} value - New mute state. */
+    set muted(value) {
+        this._setMuted(value);
+    }
+
+    /**
+     * Sets the volume, pushes it to the engine, and refreshes the controls.
+     *
+     * @private
+     * @param {number} value - New volume, clamped to 0..1.
+     * @param {Object} [options]
+     * @param {boolean} [options.unmuteIfAudible] - Also unmute when the new value is above zero.
+     * @returns {void}
+     */
+    _setVolume(value, { unmuteIfAudible = false } = {}) {
+        const clamped = Math.max(0, Math.min(1, Number(value)));
+        if (!Number.isFinite(clamped)) {
+            return;
+        }
+
+        this._volume = clamped;
+        if (unmuteIfAudible && clamped > 0 && this._muted) {
+            this._muted = false;
+        }
+
+        this._applyAudioState();
+    }
+
+    /**
+     * Sets the mute state, pushes it to the engine, and refreshes the
+     * controls.
+     *
+     * Unmuting counts as the user interacting with the page, so it is also
+     * the moment to ask the browser to lift an autoplay block -- this runs
+     * inside the click handler, which is the only place that request is
+     * granted.
+     *
+     * @private
+     * @param {boolean} value - New mute state.
+     * @returns {void}
+     */
+    _setMuted(value) {
+        this._muted = Boolean(value);
+        this._applyAudioState();
+
+        if (!this._muted && this.engine && this.engine.audioBlocked) {
+            Promise.resolve(this.engine.resumeAudio()).then(() => this._syncVolumeUi());
+        }
+    }
+
+    /**
+     * Pushes the player's volume and mute onto the current engine and brings
+     * the controls into line with it.
+     *
+     * Called on every load as well as on every change, because loading an
+     * item builds a new engine that knows none of this.
+     *
+     * @private
+     * @returns {void}
+     */
+    _applyAudioState() {
+        if (this.engine) {
+            this.engine.volume = this._volume;
+            this.engine.muted = this._muted;
+        }
+        this._syncVolumeUi();
+    }
+
+    /**
+     * Redraws the mute button and volume slider from the current state.
+     *
+     * The whole group is hidden for media with no audio track: a volume
+     * control that can never do anything reads as broken, where its absence
+     * reads as "this clip has no sound", which is the truth.
+     *
+     * @private
+     * @returns {void}
+     */
+    _syncVolumeUi() {
+        const el = this.el;
+        const hasAudio = Boolean(this.engine && this.engine.hasAudio);
+        const blocked = Boolean(this.engine && this.engine.audioBlocked);
+
+        el.volumeGroup.classList.toggle('marp-hidden', Boolean(this.engine) && !hasAudio);
+
+        el.mute.innerHTML = this._muted || this._volume === 0 ? '&#128263;' : '&#128266;';
+        el.mute.classList.toggle('marp-audio-blocked', blocked && !this._muted);
+        el.mute.title = blocked && !this._muted
+            ? 'Sound is blocked until you interact with the page. Click to enable.'
+            : this._muted
+              ? 'Unmute'
+              : 'Mute';
+
+        // Only when it is not being dragged: writing the value mid-drag
+        // fights the pointer.
+        if (this.document.activeElement !== el.volumeSlider) {
+            el.volumeSlider.value = String(this._volume);
+        }
+    }
+
     /**
      * Enables the transport and diagnostics controls once an engine is
      * running -- shared by both load paths, which need exactly this set.
@@ -709,6 +855,7 @@ export class MarpVideoPlayer {
             this.el.stepForward,
             this.el.speedInput,
             this.el.mute,
+            this.el.volumeSlider,
             this.el.fullscreen,
             this.el.rawCache,
             this.el.decodedCache,
@@ -813,6 +960,11 @@ export class MarpVideoPlayer {
         ['loadedmetadata', 'durationchange', 'resize', 'playing', 'pause'].forEach((type) => {
             engine.addEventListener(type, () => this.log(`event: ${type}`));
         });
+
+        // Fires for a write from anywhere -- this UI, a host setting
+        // window.marpVideo.volume, or the browser changing its mind about
+        // letting the page make sound.
+        engine.addEventListener('volumechange', () => this._syncVolumeUi());
 
         // seeking/seeked carry where the seek is headed and where it landed,
         // so "did the seek land somewhere unexpected" is visible directly.
@@ -1005,6 +1157,64 @@ export class MarpVideoPlayer {
         this.el.speed.textContent = `${rate}x`;
         this.el.speedInput.value = String(rate);
         this.log(`playbackRate set to ${rate}`);
+    }
+
+    /**
+     * Steps exactly one frame, without changing whether playback is running.
+     *
+     * Bound to a and s: a steps back, s steps forward, following where the two
+     * keys sit on the keyboard. The desktop application's C# has them the other
+     * way round, which is worth correcting there rather than copying here.
+     *
+     * @param {number} direction - +1 for the next frame, -1 for the previous.
+     * @returns {void}
+     */
+    stepFrame(direction) {
+        if (!this.engine) {
+            return;
+        }
+        const next = this.engine.currentTime + direction / this.engine.fps;
+        this.engine.currentTime = Math.max(0, Math.min(this.engine.duration, next));
+    }
+
+    /**
+     * Steps the playback rate by half, in the given direction, and plays.
+     *
+     * The shuttle control the desktop application binds its left and right
+     * arrow keys to, implemented here so every consumer of this package gets
+     * the same behaviour rather than each host reimplementing it. The values
+     * match `PlaybackStepSize` and `PlaybackStepLimit` in
+     * VIDEO_PROCESSING_GUI's `VideoPlayer.xaml.cs`, which is where this
+     * behaviour existed first.
+     *
+     * The current rate is rounded onto the step grid before stepping, so a
+     * rate arrived at by speed hotkey (0.08x, 2.5x) lands on a clean multiple
+     * instead of carrying its remainder forward for ever. A stepped rate of
+     * zero pauses rather than setting a rate nothing can play.
+     *
+     * @param {number} direction - +1 to speed up, -1 to slow down or reverse further.
+     * @returns {void}
+     */
+    stepPlaybackRate(direction) {
+        if (!this.engine) {
+            return;
+        }
+
+        // Paused counts as zero, so the first press from a standstill gives
+        // half speed in the direction asked for rather than resuming at
+        // whatever rate was last used.
+        const current = this.engine.paused ? 0 : this.engine.playbackRate;
+        const grid = Math.round(current / SPEED_STEP) * SPEED_STEP;
+        const stepped = Math.max(-SPEED_STEP_LIMIT, Math.min(SPEED_STEP_LIMIT, grid + direction * SPEED_STEP));
+
+        if (stepped === 0) {
+            this.engine.pause();
+            this.log('playbackRate stepped to stop');
+            return;
+        }
+
+        this.setPlaybackRate(stepped);
+        this.engine.play();
     }
 
     /**
@@ -1425,13 +1635,17 @@ export class MarpVideoPlayer {
         });
 
         el.mute.addEventListener('click', () => {
-            if (!this.engine) {
+            this._setMuted(!this._muted);
+        });
+
+        el.volumeSlider.addEventListener('input', (event) => {
+            const value = parseFloat(event.target.value);
+            if (Number.isNaN(value)) {
                 return;
             }
-            // Inert today (audio decode is not implemented yet) but wired
-            // through, so this button needs no change once audio lands.
-            this.engine.muted = !this.engine.muted;
-            el.mute.innerHTML = this.engine.muted ? '&#128263;' : '&#128266;';
+            // Dragging the slider up off zero unmutes, which is what every
+            // other player does and what someone dragging it plainly means.
+            this._setVolume(value, { unmuteIfAudible: true });
         });
 
         el.fullscreen.addEventListener('click', () => {
@@ -1462,6 +1676,18 @@ export class MarpVideoPlayer {
             el.readCache.addEventListener('click', () => this.syncCacheSettingsFromEngine());
             el.dumpState.addEventListener('click', () => this.dumpEngineState());
         }
+
+        // The browser will not let a page make sound before someone has
+        // interacted with it, and there is no event for "a gesture happened"
+        // -- any real one will do. Cheap to attach and a no-op once sound is
+        // available, so it stays on rather than being torn down.
+        const liftAudioBlock = () => {
+            if (this.engine && this.engine.audioBlocked && !this._muted) {
+                Promise.resolve(this.engine.resumeAudio()).then(() => this._syncVolumeUi());
+            }
+        };
+        this.root.addEventListener('pointerdown', liftAudioBlock);
+        this.root.addEventListener('keydown', liftAudioBlock);
 
         this.root.addEventListener('pointermove', () => this.showControlsBar());
         el.controlsBar.addEventListener('pointerenter', () => {
@@ -1494,6 +1720,22 @@ export class MarpVideoPlayer {
             if (event.key === ' ') {
                 event.preventDefault();
                 this.togglePlayPause();
+                return;
+            }
+
+            // Arrows shuttle the rate; a and s step one frame. Both come from
+            // VIDEO_PROCESSING_GUI, which bound them in C# against this player
+            // -- so a host had the behaviour and the player did not. Same keys,
+            // same directions, so muscle memory carries between the two.
+            if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+                event.preventDefault();
+                this.stepPlaybackRate(event.key === 'ArrowRight' ? 1 : -1);
+                return;
+            }
+
+            if (event.key === 'a' || event.key === 's') {
+                event.preventDefault();
+                this.stepFrame(event.key === 'a' ? -1 : 1);
                 return;
             }
 
@@ -1539,8 +1781,11 @@ export class MarpVideoPlayer {
 // consumer holds one object across item and quality changes -- each of
 // which replaces the engine underneath. Defined from a table rather than
 // written out, so this stays in step with MarpVideoShim by name.
-const READ_ONLY_ENGINE_PROPERTIES = ['duration', 'videoWidth', 'videoHeight', 'fps', 'paused', 'seeking', 'ended'];
-const WRITABLE_ENGINE_PROPERTIES = ['currentTime', 'playbackRate', 'muted', 'volume'];
+const READ_ONLY_ENGINE_PROPERTIES = ['duration', 'videoWidth', 'videoHeight', 'fps', 'paused', 'seeking', 'ended', 'hasAudio', 'audioBlocked'];
+// 'volume' and 'muted' are deliberately NOT delegated: the player owns them,
+// so they survive the engine being replaced by an item or quality change.
+// See MarpVideoPlayer's own accessors.
+const WRITABLE_ENGINE_PROPERTIES = ['currentTime', 'playbackRate'];
 const DELEGATED_ENGINE_METHODS = [
     'play',
     'pause',

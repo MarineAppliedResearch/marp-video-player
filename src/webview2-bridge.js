@@ -11,8 +11,14 @@
  *
  * Deliberately a thin translation layer only -- it reads MarpVideoShim's
  * public surface (currentTime/duration/videoWidth/videoHeight/paused/
- * playbackRate, addEventListener, requestVideoFrameCallback) the exact
- * same way any other consumer would, no special internal access.
+ * playbackRate/volume/muted/hasAudio/audioBlocked, addEventListener,
+ * requestVideoFrameCallback) the exact same way any other consumer would, no
+ * special internal access.
+ *
+ * Everything added since the original port is additive by construction: new
+ * information goes out as further `status|` lines, never as a change to the
+ * fixed field layout of `metadata|` or `frame|`, so a host built against the
+ * original protocol keeps working unchanged.
  *
  * @fileoverview Bridges MarpVideoShim events to chrome.webview.postMessage in MareMediaElement.xaml.cs's expected format.
  * @author Isaac Travers
@@ -71,6 +77,32 @@ export function attachWebView2Bridge(marpVideo, options = {}) {
         postToHost(`metadata|${duration}|${width}|${height}`);
     }
 
+    /**
+     * Posts the audio state as a `status|` line.
+     *
+     * Deliberately a `status|` message rather than a new prefix or an extra
+     * field on `metadata|`: HandleMetadataMessage splits on a fixed four
+     * fields and would break, while HandleStatusMessage matches known
+     * prefixes and logs anything else. So an unchanged host is unaffected by
+     * these, and one that wants them parses a prefix it already receives.
+     *
+     * `hasAudio` tells a host whether a volume control means anything for the
+     * loaded item; `blocked` tells it the browser is withholding sound until
+     * the page is interacted with, which in a WebView2 host driven from
+     * native code may never happen on its own -- see
+     * `--autoplay-policy=no-user-gesture-required`.
+     *
+     * @param {('audio'|'volumechange')} kind - Which line to post.
+     * @returns {void}
+     */
+    function postAudioState(kind) {
+        const volume = Number.isFinite(marpVideo.volume) ? marpVideo.volume : 1;
+        postStatus(
+            `${kind} hasAudio=${Boolean(marpVideo.hasAudio)} volume=${volume.toFixed(6)} ` +
+                `muted=${Boolean(marpVideo.muted)} blocked=${Boolean(marpVideo.audioBlocked)}`
+        );
+    }
+
     // Matches the real callbackCount field HandleFrameMessage expects as
     // its 8th field -- a running count purely for that handler's own
     // periodic ("every 25th frame") logging, not used by this bridge itself.
@@ -115,6 +147,7 @@ export function attachWebView2Bridge(marpVideo, options = {}) {
     function announceLoaded() {
         postStatus(`loadedmetadata duration=${marpVideo.duration}`);
         postMetadata();
+        postAudioState('audio');
         // Starts the frame clock -- matches the original inline glue's
         // startFrameClockIfAvailable(), called once on first
         // loadedmetadata. No "is requestVideoFrameCallback available"
@@ -146,6 +179,8 @@ export function attachWebView2Bridge(marpVideo, options = {}) {
     });
 
     marpVideo.addEventListener('playing', () => postStatus('playing'));
+
+    marpVideo.addEventListener('volumechange', () => postAudioState('volumechange'));
 
     // Carries the settled time, the way seeked does.
     //

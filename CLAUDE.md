@@ -20,6 +20,19 @@ The C# WebView2 host in `VIDEO_PROCESSING_GUI` — a different repository — de
 
 `test/e2e/host-contract.spec.js` exists to catch exactly these.
 
+**Add, never change.** New information goes out as a further `status|` line, and
+new page options as a further query parameter. `metadata|` and `frame|` are split
+on a fixed field count by `MareMediaElement.xaml.cs`, so an extra field there
+breaks a host in a repository you cannot see; `HandleStatusMessage` matches known
+prefixes and logs anything else, so a new `status|` line is free. That is why the
+audio state goes out as `status|audio ...` and `status|volumechange ...` rather
+than as fields on `metadata|`.
+
+Worth knowing: the C# host already writes `window.marpVideo.volume` and
+`.muted` on every `Volume` set, and did so throughout the period when both were
+inert properties. Implementing them was not a contract change — it made wiring
+that was already there start working.
+
 ## Two guarantees the package must keep
 
 - **No runtime dependencies.** `mp4box` and the interface are compiled into the bundles. A consumer adds one file.
@@ -41,8 +54,8 @@ Two tiers, nothing else. There is deliberately no third category of scripts you 
 
 | Command | What | Speed |
 | --- | --- | --- |
-| `npm test` | 140 unit tests against fake WebCodecs globals. No server, network, or media. | seconds |
-| `npm run test:e2e` | 28 browser tests, real decoding. Starts its own server, downloads its own media. | minutes |
+| `npm test` | 280 unit tests against fake WebCodecs and Web Audio globals. No server, network, or media. | seconds |
+| `npm run test:e2e` | 50 browser tests, real decoding. Starts its own server, downloads its own media. | minutes |
 
 **Use `npm test` for feedback.** Do not run the browser suite routinely — it decodes real 1080p video against a live server with 120-second timeouts. Leave it to the person working, via the launcher.
 
@@ -70,6 +83,64 @@ tools/serve.mjs static server for both.
 test/unit/      Jest, no dependencies.
 test/e2e/       Playwright.
 ```
+
+## Audio
+
+**Audio is decoded by the browser, not by WebCodecs.** That is the single most
+important thing to know here, and it is not a style preference — decoding audio
+the way the video is decoded does not work. Measured on the reference media,
+decoding one second of audio:
+
+| | |
+| --- | --- |
+| WebCodecs `AudioDecoder`, while GOPs decode | ~4400 ms — **slower than real time** |
+| `decodeAudioData` on ADTS, same conditions | 36–78 ms |
+
+The audio decoder ends up waiting inside the platform's media pipeline behind
+the video decoder. Video survives that: a late frame freezes the picture and
+nothing is lost. Audio cannot, because a sample that misses its moment is
+silence for ever. The symptom was audio playing for four seconds, stopping for
+twenty-two, and resuming. Issue #6 has the full investigation, including two
+theories that measurement disproved.
+
+So the path is: `fetchAudioChunks()` on the media source hands over AAC samples
+from bytes already fetched for the picture → `audio-adts.js` frames them (seven
+bytes per frame) → `decodeAudioData` → `audio-store.js` caches the AudioBuffers
+→ `audio-output.js` schedules them against the scheduler's clock.
+
+Three rules, each of which cost something:
+
+- **There is one clock.** `Scheduler#playbackPosition` — the render loop's own
+  continuous target, *not* `currentTime`, which advances in whole frames and
+  reads as 50–120 ms of drift that is not there. `Scheduler#_syncAudio` is the
+  only thing that starts or stops audio, and only on transitions.
+- **Audio never fetches.** `AudioStore` reads bytes Tier 1 already holds and
+  skips a unit whose bytes are absent. Missing audio is silence; a missing frame
+  is a stall.
+- **Audio never breaks playback.** Anything that fails ends in silence and a
+  debug line.
+
+Things that look like fixes and are not, all tried and measured: slicing the
+decode smaller, priming while paused (the paused fill worker decodes ahead too,
+so the machine is never idle), and moving to a Worker (the contention is not
+main-thread — a heartbeat showed constant blocking while flush times varied
+1000×). MediaSource with muxed fMP4 was also built and abandoned after
+`PIPELINE_ERROR_DECODE`; ADTS needs no muxer at all.
+
+On the byte-range paths, each unit's byte range is **widened** at index time to
+cover the audio overlapping its own time span. Audio and video are interleaved
+sample by sample, so fetching ten seconds of audio alone took 251 requests
+spanning 11 MB to collect 245 KB, while the video unit's range already covered
+95–98% of it. Widening costs about 5% more bytes and no extra requests.
+
+Never point an `<audio>` element at the media URL, however tempting: the browser
+refetches the whole file to find the audio track, and some of these dives are
+20 GB.
+
+Do not trust `track.audio.sample_rate` from mp4box — it reports 0 for the 96 kHz
+AAC track in this project's own media. That is correct rather than a bug: the
+`mp4a` box states its rate in 16.16 fixed point and 96000 does not fit in the
+integer part. Read the AudioSpecificConfig.
 
 ## Gotchas found the hard way
 
