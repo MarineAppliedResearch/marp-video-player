@@ -34,6 +34,18 @@ jobs:
         with:
           node-version-file: marp-video-player/.nvmrc
 
+      # The umbrella is checked out at its default branch. Until the harness is merged
+      # there, this directory does not exist -- so say that, rather than letting Node
+      # report a missing module and leaving somebody to work out why.
+      - name: The harness is available
+        run: |
+          if [ ! -d MARP/scripts/harness ]; then
+            echo "::error::MARP's default branch has no scripts/harness/ yet."
+            echo "::error::Merge the harness into the MARP umbrella first, then this repository."
+            exit 1
+          fi
+          echo "Harness found."
+
       - name: Shared instruction block matches the umbrella
         run: node MARP/scripts/harness/shared-check.mjs marp-video-player
 
