@@ -1,0 +1,57 @@
+# Harness checks, kept separate from `test.yml`.
+#
+# `test.yml` verifies the package: unit tests, the build, and the two promises the bundle
+# makes (no external imports, no remote assets). It works, and this workflow deliberately
+# does not touch it.
+#
+# What runs here is about the repository rather than the code: that the shared agent
+# instructions have not drifted from the umbrella, that no instruction file has picked up a
+# credential or an environment fact it cannot keep true, and that a task branch has no
+# unanswered blocking assumption.
+
+name: harness
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  harness:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: marp-video-player
+
+      - uses: actions/checkout@v4
+        with:
+          repository: MarineAppliedResearch/MARP
+          path: MARP
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: marp-video-player/.nvmrc
+
+      # The umbrella is checked out at its default branch. Until the harness is merged
+      # there, this directory does not exist -- so say that, rather than letting Node
+      # report a missing module and leaving somebody to work out why.
+      - name: The harness is available
+        run: |
+          if [ ! -d MARP/scripts/harness ]; then
+            echo "::error::MARP's default branch has no scripts/harness/ yet."
+            echo "::error::Merge the harness into the MARP umbrella first, then this repository."
+            exit 1
+          fi
+          echo "Harness found."
+
+      - name: Shared instruction block matches the umbrella
+        run: node MARP/scripts/harness/shared-check.mjs marp-video-player
+
+      - name: Instruction files carry no credential or stale environment fact
+        run: node MARP/scripts/harness/doc-check.mjs marp-video-player
+
+      # Passes when there is no .marp/task.md, because not every branch is a task branch.
+      - name: Task specification gate
+        run: node MARP/scripts/harness/spec-check.mjs marp-video-player
