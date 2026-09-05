@@ -144,9 +144,14 @@ Learned the expensive way, and it holds everywhere in this platform:
 - **A test that narrates a result without asserting it can lie.** This applies to
   walkthrough videos especially: a scene that says "the tile is now excluded" and only
   asserts that a panel opened will pass for weeks while excluding nothing.
-- **Run the fast tiers after every change.** Parse and unit checks cost about a second.
-  Do not run slow browser, database or hardware suites for routine feedback; they belong
-  to the person working, and to G4.
+- **Run the fast tiers after every change. Run the whole suite before calling anything
+  done.** Parse and unit checks cost about a second and are the working loop. The slow
+  tiers — browser, database, hardware — are not for routine feedback, but nothing is
+  finished until they have passed. Run them as often as the work needs; never skip them
+  to declare something working. `marp verify run` is that run.
+- **CI runs the fast tiers only, deliberately.** A minute of browser tests on every push
+  taxes every commit. That means **CI going green is not the same as the work being
+  verified** — G4 is not satisfied by a green pipeline.
 - **A skipped suite looks green.** Prerequisites missing should fail, not skip.
 
 ## Documentation that states an environment fact
