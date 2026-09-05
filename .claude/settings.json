@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/../scripts/harness/hooks/spec-gate.mjs\""
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/gate.mjs\" spec-gate"
           }
         ]
       },
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/../scripts/harness/hooks/danger-gate.mjs\""
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/gate.mjs\" danger-gate"
           }
         ]
       }
