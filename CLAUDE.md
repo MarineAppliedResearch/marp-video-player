@@ -4,6 +4,13 @@ See **[AGENTS.md](AGENTS.md)**. It is the single source for how to work in this
 repository, whichever assistant is reading it. Shared platform conventions are synced into
 the top of that file from the [umbrella repository](https://github.com/MarineAppliedResearch/MARP).
 
+@AGENTS.md
+
+<!-- The line above is not decoration: Claude Code imports that file here, so the
+     platform rules arrive with this one rather than depending on the agent choosing to
+     follow a link. A pointer is a hop, and a hop is where a hurried agent skips. -->
+
+
 ## Claude-specific
 
 `.claude/settings.json` holds the permission rules; `.claude/hooks/` holds the gates:
