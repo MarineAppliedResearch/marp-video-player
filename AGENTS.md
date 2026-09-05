@@ -102,6 +102,37 @@ data?* If yes, it is material.
 Discovering a new material assumption during G2 is normal and is not a failure. Append it,
 say so, and stop — do not guess to preserve momentum.
 
+## Working in parallel
+
+Several agents can work at once, and the model is the ordinary one: **each works on its own
+branch, in its own copy of the repository, and pushes that branch when the work is done.**
+Branches are merged the usual way. The only extra requirement is that two agents must not
+collide over the things a running MARP needs.
+
+```bash
+marp agent start marp-api 71-thumbnail-lifecycle
+```
+
+That gives the branch its own copy, its own database on its own port, its own API port, a
+written `.env`, and its dependencies installed — so it can run and test without touching
+anybody else's. `marp agent list` shows what is set up and where; `marp agent env <branch>`
+prints the settings again; `marp agent remove <branch>` throws the copy away and **keeps
+the branch**, because tidying up and discarding work should never be the same command.
+
+On a second machine there is nothing to set up: clone the repository, check out the branch,
+and it is already isolated. The command exists for putting several on one machine.
+
+Two things are deliberately shared:
+
+- **Jellyfin.** Every agent talks to the central MARP media server. It holds the real
+  library, and the tests that touch it read far more than they write. A task that genuinely
+  needs its own instance says so; nothing else should.
+- **The PostgreSQL binaries**, downloaded once. Only the data directory is per-agent.
+
+**Parallelism comes after the design is settled, never before.** Two agents each doing
+their own investigation on overlapping surface is how two incompatible interpretations of
+MARP get built. One agent settles the assumptions with the human; then the work fans out.
+
 ## Testing doctrine
 
 Learned the expensive way, and it holds everywhere in this platform:
