@@ -26,3 +26,8 @@ app/dev-config.js
 Thumbs.db
 .DS_Store
 release/
+
+# --- Harness: machine-specific operational notes ---
+# Hosts, accounts and key paths for one developer. Repository files may say that a
+# credential exists and where it lives, never its value.
+.marp/local/
