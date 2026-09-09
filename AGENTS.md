@@ -104,6 +104,62 @@ say so, and stop — do not guess to preserve momentum.
 
 ## Working in parallel
 
+**Assume you are not the only agent in this repository.** Several may be working at once,
+in their own worktrees, on branches stacked on each other, while a human commits alongside
+them. Everything in this section exists because that is now the normal case rather than the
+exception.
+
+### If you were spawned by another agent
+
+You were given a task, not the whole picture. Before touching anything:
+
+1. **Read this file, end to end, and the repository's own `AGENTS.md` section below it.**
+   Not the parts that look relevant — all of it. It carries the gates, the testing
+   doctrine, the permissions and the traps, and it is the only thing that makes two agents
+   produce compatible work. If your instructions and this file disagree, say so rather than
+   picking one.
+2. **Read the issue you were given**, and the issues it references. The spawning agent
+   summarised it; the issue is the source.
+3. **`git fetch` before you branch, and branch from what you were told to branch from.**
+   It is often *not* `develop` — stacked work is normal here, and starting from the wrong
+   base produces a conflict that looks like a merge problem and is really a reading problem.
+4. **Check what else is in flight**: `marp agent list` for workspaces, `git branch -r` and
+   `gh pr list` for branches and open reviews.
+
+### Staying out of each other's way
+
+- **Your branch is yours; `develop` is nobody's.** Never commit to `develop` or `master`,
+  and never merge another agent's branch into yours to "fix" a conflict unless you were
+  asked to.
+- **Never push and never open a pull request** unless the human explicitly said so. That is
+  gate G5 and it does not delegate.
+- **`develop` moves under you.** Another agent's work can merge while yours is running, so
+  `git fetch` before you claim to be current, before you branch, and before you report that
+  a suite is green — "green" against a stale base is not a fact about the repository.
+- **Do not fix what another agent owns.** If you find a defect outside your task, *name it
+  in your report* with what you saw and where. Do not fix it, and do not open an issue for
+  it unless you were asked to — the human decides whether it is settled now or tracked.
+- **Say what you touched.** Your report is the only record another agent has of why a file
+  changed under them. List the files, and say plainly which of them were outside the
+  obvious scope of your task and why.
+
+### When you find you are colliding
+
+Two agents in one repository collide over three things: the working tree, the ports, and a
+shared file. `marp harness check` reports the mechanical ones — the same port is a failure,
+an exclusive resource named twice in `needs:` is a failure, and two agents on one repository
+is a note for a human to judge.
+
+**A generated file is not a merge conflict, it is a regeneration.** `fixtures/*.json`,
+`docs/openapi.generated.json` and anything else with a generator are resolved by running the
+generator again, not by editing the diff. Say in your report which generated files you
+touched so whoever merges knows to re-run rather than hand-resolve.
+
+**If you are blocked by another agent's work in progress, stop and report it.** Waiting is
+cheap; two agents editing the same file from different assumptions is not.
+
+### Choosing a workspace
+
 Most tasks do not need a separate workspace. **Branch in the checkout you already have**
 — dependencies are installed, the database is up, and it costs nothing:
 
@@ -141,6 +197,22 @@ is a note for a human to judge.
 **Parallelism belongs after the design is settled, never before.** Two agents each doing
 their own investigation on overlapping surface is how two incompatible interpretations of
 MARP get built. One agent settles the assumptions with the human; then the work fans out.
+
+### If you are the one spawning an agent
+
+- **Tell it to read this file first**, and give it the path to the repository it is working
+  in. An agent that has not read the harness will guess at the gates, push when it should
+  not, and verify at a tier that cannot see the thing it changed.
+- **Name the branch to start from, explicitly**, and say why if it is not `develop`.
+- **Give it the issue number, not a summary of the issue.** Summaries drift; issues do not.
+- **Say which files are already being changed elsewhere**, and by whom, so it can keep its
+  edits small there or come back to you.
+- **Do not tell it to skip the gate.** Instructing an agent to pick a default for an
+  ambiguous question instead of stopping converts a five-minute question into an hour of
+  rework, and it has already happened here.
+- **Its report is the only thing anyone sees.** Ask for what it did per requirement, real
+  test output including failures, the branch and its commits, every judgement call it made,
+  and anything broken it found and left alone.
 
 ## Testing doctrine
 
