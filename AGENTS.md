@@ -53,8 +53,16 @@ Never commit directly to `master` or `develop`.
 ## Keep commit messages short
 
 Subject under ~72 characters plus a few one-line bullets. Reference the issue with
-`Refs #NN` or `Closes #NN`. Cross-repository work references the other side in full:
+`Refs #NN`. Cross-repository work references the other side in full:
 `MarineAppliedResearch/MARP_API#68`.
+
+**Never `Closes`, `Fixes` or `Resolves`, in a commit message or a pull request body.** An
+issue is closed by a person who has decided it is done — after they have used the thing,
+not when a merge succeeds. Closing it is a judgement, and it is theirs.
+
+Those keywords happen not to fire here anyway: GitHub honours them only on merges to the
+repository's *default* branch, which is `master`, while work merges to `develop`. Do not
+rely on that. It is an accident of configuration, and the rule stands on its own.
 
 ## The workflow, and where it stops for a human
 
