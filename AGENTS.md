@@ -218,6 +218,19 @@ MARP get built. One agent settles the assumptions with the human; then the work 
 - **Do not tell it to skip the gate.** Instructing an agent to pick a default for an
   ambiguous question instead of stopping converts a five-minute question into an hour of
   rework, and it has already happened here.
+- **Scale the brief to the change.** A fifteen-line change does not need a research brief.
+  Asking for a baseline established twice, a mutation per assertion, a real-hardware run and
+  a deliberation on an edge case is right for a contract spanning two repositories and
+  absurd for adding one field — it turns minutes of work into an hour, and the agent will do
+  every part of it because you asked. Say which parts to skip. Keep the *rules* whatever the
+  size: authorship, no push, no pull request, no issues.
+- **Do not ask a question the spec already answers.** Before listing open questions for the
+  human, check `.marp/task.md` and the issue comments for the ones already settled. Sending
+  an agent to ask about a decision recorded an hour earlier wastes their time and teaches
+  them the record is not trustworthy. Note that `marp spec retire` takes the spec off the
+  integration branch once it merges, so the answers are reached with
+  `git show <task-branch>:.marp/task.md` — give an agent that command rather than letting it
+  conclude the decisions were never made.
 - **Its report is the only thing anyone sees.** Ask for what it did per requirement, real
   test output including failures, the branch and its commits, every judgement call it made,
   and anything broken it found and left alone.

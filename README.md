@@ -258,8 +258,8 @@ Open the folder and use **Run and Debug** (<kbd>F5</kbd>):
 | Configuration | What it does |
 | --- | --- |
 | Open player in browser | Rebuilds, starts the server, opens the player |
-| Run unit tests | 280 tests, no dependencies |
-| Run browser tests | 50 tests in a real browser |
+| Run unit tests | Fast, no dependencies — the working loop |
+| Run browser tests | The slow tier, in a real browser |
 | Build library | The three bundles into `dist/` |
 | Build docs | JSDoc reference into `docs/generated/` |
 
