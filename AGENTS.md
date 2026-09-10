@@ -49,6 +49,21 @@ Never commit directly to `master` or `develop`.
 - **Ask about meaning rather than inferring it from the data.** How a field is meant to
   work, what an empty value means, whether two similar rows are one thing or two — these
   are answerable by the person who recorded them and not reliably by inspection.
+- **"Seed it" means write a seeder, not type SQL.** Anything another machine or another
+  person will need again goes in the repository as a migration or a checked-in script that
+  can be run twice. Rows typed into a local database by hand exist on exactly one computer,
+  are invisible to everybody else, and are gone the next time that database is rebuilt.
+
+  This is written out because of what it cost. A model, a project, a session and seven
+  species-mapping rows were inserted by hand here to get the first real inference job
+  running. Nothing was committed. The row ids from that database — a model id, a session id
+  — then went into instructions for a second machine, where they meant nothing, and an agent
+  on that machine had to work out the seeding from scratch before it could run anything at
+  all. The work was fine; it was unrepeatable, which made it worthless to anyone else.
+
+  The same rule governs what you then write down: **never quote an id out of a hand-made
+  local database as though it were a fact about MARP.** Name the seeder and say to use the
+  ids it reports.
 
 ## Keep commit messages short
 
