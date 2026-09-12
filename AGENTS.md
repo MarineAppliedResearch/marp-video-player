@@ -71,13 +71,23 @@ Subject under ~72 characters plus a few one-line bullets. Reference the issue wi
 `Refs #NN`. Cross-repository work references the other side in full:
 `MarineAppliedResearch/MARP_API#68`.
 
-**Never `Closes`, `Fixes` or `Resolves`, in a commit message or a pull request body.** An
-issue is closed by a person who has decided it is done — after they have used the thing,
-not when a merge succeeds. Closing it is a judgement, and it is theirs.
+**Never `Closes`, `Fixes` or `Resolves`, in a commit message or a pull request body.** Say
+`Refs #NN` and close the issue yourself.
 
 Those keywords happen not to fire here anyway: GitHub honours them only on merges to the
 repository's *default* branch, which is `master`, while work merges to `develop`. Do not
 rely on that. It is an accident of configuration, and the rule stands on its own.
+
+**Close the issue when its pull request merges.** That is the agent's job, not something to
+hand back. `gh issue close <n> --comment "Delivered in #<pr>, merged to develop."` — one
+command, at the moment the merge succeeds, for every issue the pull request delivered.
+
+This paragraph used to say the opposite: that closing was a judgement belonging to the
+human, made after using the thing. That was wrong and it wasted his time — he had to ask
+for it repeatedly, on work that was demonstrably finished and merged. **Merged is done.**
+If a pull request did not finish an issue, say so in the pull request and leave the issue
+open with a comment explaining what is left; do not leave every issue open on the theory
+that somebody else will decide.
 
 ## The workflow, and where it stops for a human
 
@@ -239,6 +249,17 @@ MARP get built. One agent settles the assumptions with the human; then the work 
   absurd for adding one field — it turns minutes of work into an hour, and the agent will do
   every part of it because you asked. Say which parts to skip. Keep the *rules* whatever the
   size: authorship, no push, no pull request, no issues.
+- **The agent does not end the feature; you do.** An agent runs what can see *its* change
+  and stops. The end-of-phase run belongs to whoever is supervising — one run, once, when
+  the phase is actually assembled. Letting each agent run it means running it twice for
+  nothing, and neither run is the one that counts, because the phase was not finished when
+  it happened.
+- **Name the test group, never the whole suite.** Write *"run `npm run test:mosaic`"*, not
+  *"run the suite before you call it done"* — the second reads as `npm test`, and an agent
+  will spend fifteen minutes on it without comment because you asked. The same goes for
+  proving a test red: name the file. This is the single most expensive brief-writing mistake
+  made here so far, and it was made after the suite had already been split into groups for
+  exactly this reason.
 - **Do not ask a question the spec already answers.** Before listing open questions for the
   human, check `.marp/task.md` and the issue comments for the ones already settled. Sending
   an agent to ask about a decision recorded an hour earlier wastes their time and teaches
@@ -261,11 +282,32 @@ Learned the expensive way, and it holds everywhere in this platform:
 - **A test that narrates a result without asserting it can lie.** This applies to
   walkthrough videos especially: a scene that says "the tile is now excluded" and only
   asserts that a panel opened will pass for weeks while excluding nothing.
-- **Run the fast tiers after every change. Run the whole suite before calling anything
-  done.** Parse and unit checks cost about a second and are the working loop. The slow
-  tiers — browser, database, hardware — are not for routine feedback, but nothing is
-  finished until they have passed. Run them as often as the work needs; never skip them
-  to declare something working. `marp verify run` is that run.
+- **A narrated walkthrough is not automated testing. It is for the human to watch.** It is
+  never coverage, never the evidence that something works, and never cited in place of a
+  test. Record one only when he asks for one. The assertions inside a scenario exist so a
+  broken app fails instead of producing a convincing film of something that does not work —
+  that is quality control on the film, not proof of the feature. **And it runs on test data,
+  never on real records:** a recording signs in as a real user and commits real decisions, so
+  pointed at a production or development corpus it writes to the record while demonstrating a
+  feature. Sixty review rows reached marp-api's corpus that way. Point a recording at a
+  disposable copy of the data, not the data.
+- **Run the tests that can see your change. Nothing else, and never the whole suite as a
+  working loop.** Parse and unit checks cost about a second. Where a repository groups its
+  suites — marp-api's `npm run test:mosaic`, `test:species` and the rest, listed by
+  `npm run test:subsystems` — **run the group you touched**, which is tens of seconds
+  against minutes for everything. A repository that has bothered to split its suite has
+  already decided this; do not go around it.
+- **One test going red needs one test file, not a suite.** Demonstrating that a tripwire
+  fails before a fix is `npx jest <file> -t '<name>'` and about ten seconds. Running a
+  whole suite to prove it, and again to prove it green, has cost this project twenty
+  minutes of an agent's run for ten seconds of information. **Never ask an agent for a
+  full-suite baseline, and never run one to establish one.**
+- **The whole suite belongs to the end of a phase, and it is the human's call.** Nothing is
+  finished until the slow tiers — browser, database, hardware — have passed, and they must
+  never be skipped to declare something working. But they are the gate on a phase, not a
+  toll on every change, and an agent should report that its targeted tiers are green and
+  **stop** rather than spend fifteen minutes nobody asked for. `marp verify run` is that
+  end-of-phase run.
 - **CI runs the fast tiers only, deliberately.** A minute of browser tests on every push
   taxes every commit. That means **CI going green is not the same as the work being
   verified** — G4 is not satisfied by a green pipeline.
