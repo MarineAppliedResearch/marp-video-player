@@ -15,10 +15,13 @@ being processed, with the model's detections and tracks drawn as they happen.
 - **R1** — Display requires both a worker screen option and `params.watch: true`.
 - **R2** — The player accepts already-decoded inference frames without decoding media.
 - **R3** — Frames are drawn in order without pacing or dropping.
-- **R4** — Stable-color boxes show species, track id, and persistence with legible labels.
+- **R4** — Each species has one stable box/label colour. The top label is centered over
+  and sized to its box and contains only the species name. A centered bottom label shows
+  confidence while retaining track id and persistence.
 - **R5** — Status shows frame number, achieved rate, and live-track count.
 - **R6** — Existing player APIs and offline host behavior remain compatible.
-- **R7** — Fullscreen, Escape, and close work; there is no pause, audio, or scrubbing.
+- **R7** — Escape leaves fullscreen for the normal app window; its close control closes
+  the display. There is no pause, audio, or scrubbing.
 - **R8** — Installer and distribution work are outside this issue.
 
 ## Open assumptions
@@ -33,6 +36,8 @@ being processed, with the model's detections and tracks drawn as they happen.
 ## Decisions
 
 - **2026-09-14** — Add an external live-frame presenter beside normal media playback.
+- **2026-09-14** — Use species identity for annotation colour, split the label above and
+  below its box, and let Chromium return Escape to windowed mode.
 
 ## Plan
 

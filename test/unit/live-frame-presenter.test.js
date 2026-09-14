@@ -7,6 +7,7 @@ function surface() {
     const context = {
         drawImage: (...args) => calls.push(['image', ...args]),
         strokeRect: (...args) => calls.push(['box', ...args]),
+        fillRect: (...args) => calls.push(['labelBackground', ...args]),
         strokeText: (...args) => calls.push(['strokeText', ...args]),
         fillText: (...args) => calls.push(['fillText', ...args]),
     };
@@ -44,7 +45,7 @@ describe('LiveFramePresenter', () => {
         const first = presenter.present({
             frame,
             frameNumber: 40,
-            tracks: [{ trackId: 7, species: 'California sea cucumber', box: [0.5, 0.5, 0.2, 0.4] }],
+            tracks: [{ trackId: 7, species: 'California sea cucumber', confidence: 0.87, box: [0.5, 0.5, 0.2, 0.4] }],
         }).then((result) => {
             acknowledged = true;
             return result;
@@ -53,8 +54,11 @@ describe('LiveFramePresenter', () => {
         expect(canvas).toMatchObject({ width: 1000, height: 500 });
         expect(calls[0]).toEqual(['image', frame, 0, 0, 1000, 500]);
         expect(calls).toContainEqual(['box', 400, 150, 200, 200]);
-        expect(calls.some((call) => call[0] === 'strokeText'
-            && call[1] === 'California sea cucumber  #7  1f')).toBe(true);
+        expect(calls.some((call) => call[0] === 'fillText'
+            && call[1] === 'California sea cucumber' && call[2] === 500)).toBe(true);
+        expect(calls.some((call) => call[0] === 'fillText'
+            && call[1] === '87%  #7  1f' && call[2] === 500)).toBe(true);
+        expect(calls.some((call) => call[0] === 'strokeText')).toBe(false);
         expect(status.textContent).toMatch(/^Frame 40\s+·\s+[\d.]+ fps\s+·\s+1 live$/);
         expect(acknowledged).toBe(false);
 
@@ -64,15 +68,15 @@ describe('LiveFramePresenter', () => {
         const second = presenter.present({
             frame,
             frameNumber: 43,
-            tracks: [{ trackId: 7, species: 'California sea cucumber', box: [0.5, 0.5, 0.2, 0.4] }],
+            tracks: [{ trackId: 7, species: 'California sea cucumber', confidence: 0.87, box: [0.5, 0.5, 0.2, 0.4] }],
         });
         expect(calls.some((call) => call[0] === 'fillText'
-            && call[1] === 'California sea cucumber  #7  4f')).toBe(true);
+            && call[1] === '87%  #7  4f')).toBe(true);
         animationCallbacks.shift()();
         await second;
     });
 
-    test('keeps one stable colour per track and resets its persistence state for another job', async () => {
+    test('keeps one stable colour per species and resets persistence for another job', async () => {
         const { canvas, context } = surface();
         const presenter = new LiveFramePresenter(canvas);
         const colours = [];
@@ -82,16 +86,23 @@ describe('LiveFramePresenter', () => {
             },
         });
         const frame = { width: 640, height: 360 };
-        const track = { id: 'animal-a', className: 'Fish', bboxNormalized: { x1: 0.1, y1: 0.2, x2: 0.4, y2: 0.5 } };
+        const firstTrack = { id: 'animal-a', className: 'Fish', bboxNormalized: { x1: 0.1, y1: 0.2, x2: 0.4, y2: 0.5 } };
+        const secondTrack = { ...firstTrack, id: 'animal-b' };
+        const otherSpecies = { ...firstTrack, id: 'animal-c', className: 'Crab' };
 
-        const first = presenter.present({ frame, frameNumber: 10, tracks: [track] });
+        const first = presenter.present({ frame, frameNumber: 10, tracks: [firstTrack] });
         animationCallbacks.shift()();
         await first;
-        const second = presenter.present({ frame, frameNumber: 11, tracks: [track] });
+        const second = presenter.present({ frame, frameNumber: 11, tracks: [secondTrack] });
         animationCallbacks.shift()();
         await second;
 
+        const third = presenter.present({ frame, frameNumber: 12, tracks: [otherSpecies] });
+        animationCallbacks.shift()();
+        await third;
+
         expect(colours[0]).toBe(colours[1]);
+        expect(colours[2]).not.toBe(colours[0]);
         presenter.reset();
         expect(presenter.trackFirstFrame.size).toBe(0);
         expect(presenter.presentedFrames).toBe(0);

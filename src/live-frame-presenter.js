@@ -10,10 +10,10 @@
  * @module video-engine/live-frame-presenter
  */
 
-/** FNV-1a gives a stable, inexpensive colour choice for a track identifier. */
-function trackHue(trackId) {
+/** FNV-1a gives every species one stable, inexpensive colour choice. */
+function speciesHue(species) {
     let hash = 2166136261;
-    for (const character of String(trackId)) {
+    for (const character of String(species).toLowerCase()) {
         hash ^= character.charCodeAt(0);
         hash = Math.imul(hash, 16777619);
     }
@@ -104,11 +104,9 @@ export class LiveFramePresenter {
 
     _drawTracks(tracks, frameNumber, width, height) {
         const lineWidth = Math.max(2, height * 0.004);
-        const fontSize = Math.max(12, Math.round(height * 0.027));
         this.context.lineWidth = lineWidth;
-        this.context.font = `700 ${fontSize}px system-ui, sans-serif`;
-        this.context.textBaseline = 'bottom';
         this.context.lineJoin = 'round';
+        this.context.textAlign = 'center';
 
         for (const track of tracks) {
             const trackId = track.trackId ?? track.track_id ?? track.id;
@@ -117,20 +115,39 @@ export class LiveFramePresenter {
             const firstFrame = this.trackFirstFrame.get(trackId) ?? frameNumber;
             this.trackFirstFrame.set(trackId, firstFrame);
             const age = Math.max(1, frameNumber - firstFrame + 1);
-            const colour = `hsl(${trackHue(trackId)} 88% 56%)`;
-            const label = `${species}  #${trackId}  ${age}f`;
+            const confidence = Number(track.confidence);
+            const detail = `${Number.isFinite(confidence) ? `${Math.round(confidence * 100)}%` : '--'}  #${trackId}  ${age}f`;
+            const colour = `hsl(${speciesHue(species)} 88% 56%)`;
+            const boxWidth = Math.max(1, edges.x2 - edges.x1);
+            const longestLabel = species.length >= detail.length ? species : detail;
+            const fontSize = Math.max(
+                10,
+                Math.min(height * 0.055, boxWidth / Math.max(longestLabel.length * 0.58, 1)),
+            );
+            const labelX = Math.max(boxWidth / 2, Math.min(width - boxWidth / 2, (edges.x1 + edges.x2) / 2));
 
             this.context.strokeStyle = colour;
-            this.context.strokeRect(edges.x1, edges.y1, edges.x2 - edges.x1, edges.y2 - edges.y1);
+            this.context.strokeRect(edges.x1, edges.y1, boxWidth, edges.y2 - edges.y1);
 
-            // A dark halo keeps labels readable over both sand and dark water.
-            const labelX = Math.max(0, edges.x1);
-            const labelY = Math.max(fontSize + lineWidth, edges.y1 - lineWidth);
-            this.context.lineWidth = Math.max(3, fontSize * 0.24);
-            this.context.strokeStyle = 'rgba(0, 0, 0, 0.88)';
-            this.context.strokeText(label, labelX, labelY);
+            // A small translucent plate keeps plain text readable without an
+            // outline around every letter.
+            this.context.font = `700 ${fontSize}px system-ui, sans-serif`;
+            this.context.textBaseline = 'bottom';
+            const speciesY = Math.max(fontSize + lineWidth, edges.y1 - lineWidth);
+            this.context.fillStyle = 'rgba(0, 0, 0, 0.42)';
+            this.context.fillRect(edges.x1, speciesY - fontSize * 1.12, boxWidth, fontSize * 1.2);
             this.context.fillStyle = colour;
-            this.context.fillText(label, labelX, labelY);
+            this.context.fillText(species, labelX, speciesY);
+
+            this.context.textBaseline = 'top';
+            const preferredDetailY = edges.y2 + lineWidth;
+            const detailY = preferredDetailY + fontSize <= height
+                ? preferredDetailY
+                : Math.max(0, edges.y2 - fontSize - lineWidth);
+            this.context.fillStyle = 'rgba(0, 0, 0, 0.42)';
+            this.context.fillRect(edges.x1, detailY, boxWidth, fontSize * 1.2);
+            this.context.fillStyle = colour;
+            this.context.fillText(detail, labelX, detailY);
             this.context.lineWidth = lineWidth;
         }
     }
