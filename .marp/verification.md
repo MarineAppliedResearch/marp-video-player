@@ -28,3 +28,12 @@ The human approved the watch-mode portions of this plan on 2026-09-14.
   API/Jellyfin/GPU run. The visible run took 24.20 s (12.39 fps), versus 8.75 s headless,
   and produced the same 20,992-byte scientific artifact with SHA-256
   `78a42ec94592689391e2e92e8cc1db2004a841bc35da88b3714fd10dc4cee1e1`.
+- **Concurrent full-video presentation — PASS.** Two full Dive 14 ranges completed together
+  with `rockfish5`, followed by two full ranges with `Star4` (29,062 and 24,820 frames). A
+  focused display-only regression also presented 900 annotated frames in each of two windows
+  at 30 fps and closed both windows at completion.
+- **Restore and occlusion handling — implemented.** The live page redraws its latest packet on
+  focus, visibility restoration, and `pageshow`; acknowledgement uses the synchronous canvas
+  update so a covered fullscreen window does not wait on a suspended animation callback.
+- **Final focused check — PASS.** `test/unit/live-frame-presenter.test.js`: `2 passed`; the
+  production build completed with the same pre-existing duplicate `onUnitReady` warning.

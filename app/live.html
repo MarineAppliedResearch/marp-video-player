@@ -22,6 +22,8 @@
                 muted: true,
             });
             const presenter = player.startLivePresentation();
+            let latestPacket = null;
+            let redrawInProgress = false;
 
             function decodeBase64(value, type) {
                 const binary = atob(value);
@@ -29,6 +31,40 @@
                 for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
                 return new Blob([bytes], { type });
             }
+
+            async function presentPacket(packet) {
+                const bitmap = await createImageBitmap(decodeBase64(packet.image, packet.content_type));
+                try {
+                    await presenter.present({
+                            frame: bitmap,
+                            frameNumber: packet.frame_number,
+                            tracks: packet.tracks,
+                            rangeStart: packet.range_start,
+                            rangeEnd: packet.range_end,
+                            jobId: packet.job_id,
+                            modelName: packet.model_name,
+                            speciesNames: packet.species_names,
+                    });
+                } finally {
+                    bitmap.close();
+                }
+            }
+
+            async function redrawLatest() {
+                if (!latestPacket || redrawInProgress) return;
+                redrawInProgress = true;
+                try {
+                    await presentPacket(latestPacket);
+                } finally {
+                    redrawInProgress = false;
+                }
+            }
+
+            window.addEventListener('focus', redrawLatest);
+            window.addEventListener('pageshow', redrawLatest);
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') redrawLatest();
+            });
 
             async function run() {
                 let acknowledgedFrame = null;
@@ -42,16 +78,8 @@
                     if (!response.ok) throw new Error(`live frame request returned ${response.status}`);
 
                     const packet = await response.json();
-                    const bitmap = await createImageBitmap(decodeBase64(packet.image, packet.content_type));
-                    try {
-                        await presenter.present({
-                            frame: bitmap,
-                            frameNumber: packet.frame_number,
-                            tracks: packet.tracks,
-                        });
-                    } finally {
-                        bitmap.close();
-                    }
+                    latestPacket = packet;
+                    await presentPacket(packet);
                     acknowledgedFrame = packet.frame_number;
                 }
             }

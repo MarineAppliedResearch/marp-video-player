@@ -16,35 +16,40 @@ function surface() {
         context,
         calls,
         status: { textContent: '' },
+        progress: { max: 0, value: 0 },
+        jobContext: { textContent: '' },
     };
 }
 
 describe('LiveFramePresenter', () => {
-    let animationCallbacks;
-
     beforeEach(() => {
-        animationCallbacks = [];
-        global.requestAnimationFrame = (callback) => {
-            animationCallbacks.push(callback);
-            return animationCallbacks.length;
-        };
         jest.spyOn(performance, 'now').mockReturnValueOnce(1000).mockReturnValue(1100);
     });
 
     afterEach(() => {
-        delete global.requestAnimationFrame;
         jest.restoreAllMocks();
     });
 
     test('draws the supplied frame, readable track identity, persistence, and status before acknowledging', async () => {
-        const { canvas, calls, status } = surface();
-        const presenter = new LiveFramePresenter(canvas, { statusElement: status });
+        const {
+            canvas, calls, status, progress, jobContext,
+        } = surface();
+        const presenter = new LiveFramePresenter(canvas, {
+            statusElement: status,
+            progressElement: progress,
+            contextElement: jobContext,
+        });
         const frame = { width: 1000, height: 500 };
 
         let acknowledged = false;
         const first = presenter.present({
             frame,
             frameNumber: 40,
+            rangeStart: 20,
+            rangeEnd: 120,
+            jobId: 98,
+            modelName: 'rockfish5',
+            speciesNames: ['Blue/Deacon Rockfish', 'Lingcod'],
             tracks: [{ trackId: 7, species: 'California sea cucumber', confidence: 0.87, box: [0.5, 0.5, 0.2, 0.4] }],
         }).then((result) => {
             acknowledged = true;
@@ -59,10 +64,13 @@ describe('LiveFramePresenter', () => {
         expect(calls.some((call) => call[0] === 'fillText'
             && call[1] === '87%  #7  1f' && call[2] === 500)).toBe(true);
         expect(calls.some((call) => call[0] === 'strokeText')).toBe(false);
-        expect(status.textContent).toMatch(/^Frame 40\s+·\s+[\d.]+ fps\s+·\s+1 live$/);
+        expect(status.textContent).toMatch(/^Frame 40\s+·\s+21 \/ 100\s+·\s+[\d.]+ fps\s+·\s+1 live$/);
+        expect(progress).toMatchObject({ max: 100, value: 21 });
+        expect(jobContext.textContent).toBe(
+            'Job 98  |  Model rockfish5  |  Blue/Deacon Rockfish  ·  Lingcod',
+        );
         expect(acknowledged).toBe(false);
 
-        animationCallbacks.shift()();
         expect(await first).toMatchObject({ frameNumber: 40, liveTracks: 1 });
 
         const second = presenter.present({
@@ -72,7 +80,6 @@ describe('LiveFramePresenter', () => {
         });
         expect(calls.some((call) => call[0] === 'fillText'
             && call[1] === '87%  #7  4f')).toBe(true);
-        animationCallbacks.shift()();
         await second;
     });
 
@@ -91,14 +98,11 @@ describe('LiveFramePresenter', () => {
         const otherSpecies = { ...firstTrack, id: 'animal-c', className: 'Crab' };
 
         const first = presenter.present({ frame, frameNumber: 10, tracks: [firstTrack] });
-        animationCallbacks.shift()();
         await first;
         const second = presenter.present({ frame, frameNumber: 11, tracks: [secondTrack] });
-        animationCallbacks.shift()();
         await second;
 
         const third = presenter.present({ frame, frameNumber: 12, tracks: [otherSpecies] });
-        animationCallbacks.shift()();
         await third;
 
         expect(colours[0]).toBe(colours[1]);

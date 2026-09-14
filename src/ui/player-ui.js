@@ -1280,6 +1280,17 @@ export class MarpVideoPlayer {
         status.setAttribute('aria-live', 'polite');
         this.root.appendChild(status);
 
+        const progress = this.document.createElement('progress');
+        progress.className = 'marp-live-progress';
+        progress.max = 1;
+        progress.value = 0;
+        progress.setAttribute('aria-label', 'Inference range progress');
+        this.root.appendChild(progress);
+
+        const context = this.document.createElement('div');
+        context.className = 'marp-live-context';
+        this.root.appendChild(context);
+
         if (options.fullscreenButton !== false) {
             const fullscreen = this.document.createElement('button');
             fullscreen.className = 'marp-live-fullscreen';
@@ -1290,7 +1301,11 @@ export class MarpVideoPlayer {
             this.root.appendChild(fullscreen);
         }
 
-        this.livePresenter = new LiveFramePresenter(this.el.canvas, { statusElement: status });
+        this.livePresenter = new LiveFramePresenter(this.el.canvas, {
+            statusElement: status,
+            progressElement: progress,
+            contextElement: context,
+        });
         return this.livePresenter;
     }
 

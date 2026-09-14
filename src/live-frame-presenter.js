@@ -52,6 +52,8 @@ export class LiveFramePresenter {
      * @param {HTMLCanvasElement} canvas - MARP player's visual frame surface.
      * @param {Object} [options]
      * @param {HTMLElement|null} [options.statusElement] - Optional quiet status line.
+     * @param {HTMLProgressElement|null} [options.progressElement] - Optional range timeline.
+     * @param {HTMLElement|null} [options.contextElement] - Optional model and job context.
      */
     constructor(canvas, options = {}) {
         if (!canvas || typeof canvas.getContext !== 'function') {
@@ -61,6 +63,9 @@ export class LiveFramePresenter {
         this.canvas = canvas;
         this.context = canvas.getContext('2d');
         this.statusElement = options.statusElement || null;
+        this.progressElement = options.progressElement || null;
+        this.contextElement = options.contextElement || null;
+        this.contextSignature = null;
         this.presentedFrames = 0;
         this.startedAt = null;
         this.trackFirstFrame = new Map();
@@ -75,7 +80,16 @@ export class LiveFramePresenter {
      * @param {Array<Object>} [packet.tracks] - Current tracks with id, species and box.
      * @returns {Promise<Object>} Presentation acknowledgement and current measured rate.
      */
-    async present({ frame, frameNumber, tracks = [] }) {
+    async present({
+        frame,
+        frameNumber,
+        tracks = [],
+        rangeStart = null,
+        rangeEnd = null,
+        jobId = null,
+        modelName = null,
+        speciesNames = [],
+    }) {
         if (!frame) throw new TypeError('A live frame packet requires frame');
 
         const width = Number(frame.displayWidth || frame.videoWidth || frame.naturalWidth || frame.width);
@@ -94,11 +108,12 @@ export class LiveFramePresenter {
         this.presentedFrames += 1;
         const elapsedSeconds = Math.max((performance.now() - this.startedAt) / 1000, 0.001);
         const rate = this.presentedFrames / elapsedSeconds;
-        this._showStatus(frameNumber, rate, tracks.length);
+        this._showStatus(frameNumber, rate, tracks.length, rangeStart, rangeEnd);
+        this._showContext(jobId, modelName, speciesNames);
 
-        // Resolve after the browser has accepted the complete draw. The worker
-        // waits for this acknowledgement before it sends another frame.
-        await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+        // Canvas drawing updates its backing store synchronously. Acknowledging
+        // here keeps an occluded fullscreen window alive: browsers may suspend
+        // requestAnimationFrame entirely while another window covers it.
         return { frameNumber: Number(frameNumber), rate, liveTracks: tracks.length };
     }
 
@@ -152,9 +167,31 @@ export class LiveFramePresenter {
         }
     }
 
-    _showStatus(frameNumber, rate, liveTracks) {
+    _showStatus(frameNumber, rate, liveTracks, rangeStart, rangeEnd) {
         if (!this.statusElement) return;
-        this.statusElement.textContent = `Frame ${frameNumber}  ·  ${rate.toFixed(1)} fps  ·  ${liveTracks} live`;
+        const start = Number(rangeStart);
+        const end = Number(rangeEnd);
+        const hasRange = Number.isFinite(start) && Number.isFinite(end) && end > start;
+        const position = hasRange ? Math.max(0, Math.min(end - start, Number(frameNumber) - start + 1)) : 0;
+        const rangeText = hasRange ? `  ·  ${position} / ${end - start}` : '';
+        this.statusElement.textContent = `Frame ${frameNumber}${rangeText}  ·  ${rate.toFixed(1)} fps  ·  ${liveTracks} live`;
+        if (this.progressElement) {
+            this.progressElement.max = hasRange ? end - start : 1;
+            this.progressElement.value = position;
+        }
+    }
+
+    _showContext(jobId, modelName, speciesNames) {
+        if (!this.contextElement) return;
+        const parts = [];
+        if (jobId !== null && jobId !== undefined && String(jobId)) parts.push(`Job ${jobId}`);
+        if (modelName) parts.push(`Model ${modelName}`);
+        if (Array.isArray(speciesNames) && speciesNames.length) parts.push(speciesNames.join('  ·  '));
+        const signature = parts.join('  |  ');
+        if (signature !== this.contextSignature) {
+            this.contextElement.textContent = signature;
+            this.contextSignature = signature;
+        }
     }
 
     /** Forget rate and persistence state before a different job starts. */
@@ -162,6 +199,7 @@ export class LiveFramePresenter {
         this.presentedFrames = 0;
         this.startedAt = null;
         this.trackFirstFrame.clear();
+        this.contextSignature = null;
     }
 }
 
