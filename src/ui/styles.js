@@ -114,6 +114,34 @@ export const PLAYER_CSS = `
     object-fit: contain;
 }
 
+.marp-player .marp-live-status {
+    position: absolute;
+    left: 12px;
+    bottom: 10px;
+    z-index: 4;
+    padding: 5px 9px;
+    border-radius: 5px;
+    color: rgba(255, 255, 255, 0.92);
+    background: rgba(0, 0, 0, 0.48);
+    font: 600 13px/1.2 system-ui, sans-serif;
+    pointer-events: none;
+}
+
+.marp-player .marp-live-fullscreen {
+    position: absolute;
+    right: 10px;
+    bottom: 9px;
+    z-index: 5;
+    width: 34px;
+    height: 30px;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 5px;
+    color: white;
+    background: rgba(0, 0, 0, 0.48);
+    cursor: pointer;
+    font-size: 20px;
+}
+
 /* Shown centered over the canvas until the first frame is presented. */
 .marp-player .marp-logo {
     position: absolute;
