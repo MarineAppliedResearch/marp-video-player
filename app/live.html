@@ -24,6 +24,7 @@
             const presenter = player.startLivePresentation();
             let latestPacket = null;
             let redrawInProgress = false;
+            let renderProofSent = false;
 
             function decodeBase64(value, type) {
                 const binary = atob(value);
@@ -45,6 +46,14 @@
                             modelName: packet.model_name,
                             speciesNames: packet.species_names,
                     });
+                    if (!renderProofSent) {
+                        const canvas = document.querySelector('.marp-canvas');
+                        const proof = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+                        if (proof) {
+                            await fetch('/render-proof', { method: 'POST', body: proof });
+                            renderProofSent = true;
+                        }
+                    }
                 } finally {
                     bitmap.close();
                 }
