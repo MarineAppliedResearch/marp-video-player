@@ -37,3 +37,8 @@ The human approved the watch-mode portions of this plan on 2026-09-14.
   update so a covered fullscreen window does not wait on a suspended animation callback.
 - **Final focused check — PASS.** `test/unit/live-frame-presenter.test.js`: `2 passed`; the
   production build completed with the same pre-existing duplicate `onUnitReady` warning.
+- **Installed laptop display — PASS.** Installer v17 used this player for API job 219. The
+  watched CUDA run displayed real video, boxes, labels, model/job status, and progress at
+  approximately 17 fps, then the API recorded all 1,000 requested frames as succeeded.
+- **Render proof retained.** The diagnostic render-proof endpoint remains available for the
+  next-computer rollout so a remote operator can distinguish host launch from canvas paint.

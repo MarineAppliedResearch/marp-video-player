@@ -1,7 +1,7 @@
 ---
 task: MarineAppliedResearch/marp-inference-worker#11
 repos: [marp-inference-worker, marp-video-player]
-status: verifying
+status: ready-for-pr
 needs: []
 ---
 
@@ -56,5 +56,5 @@ See `.marp/verification.md`.
 
 ## Status
 
-- **Gate:** verifying.
+- **Gate:** verified; ready for pull request.
 - **Notes:** The live presenter is implemented; installer controls were removed from scope.
