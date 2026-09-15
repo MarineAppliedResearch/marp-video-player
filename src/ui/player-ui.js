@@ -21,6 +21,7 @@
  */
 
 import { createMarpVideoEngine } from '../index.js';
+import { LiveFramePresenter } from '../live-frame-presenter.js';
 import { JellyfinClient } from '../jellyfin-client.js';
 import { JellyfinMediaSource } from '../media-source-jellyfin-transcode.js';
 import { LocalFileMediaSource } from '../media-source-local.js';
@@ -1253,6 +1254,59 @@ export class MarpVideoPlayer {
             return this.document.exitFullscreen();
         }
         return this.root.requestFullscreen();
+    }
+
+    /**
+     * Turns this player's visual surface into an externally-fed live view.
+     *
+     * The normal engine remains absent because the host already decoded each
+     * frame. The MARP player still owns the canvas, styling and fullscreen.
+     *
+     * @param {Object} [options]
+     * @param {boolean} [options.fullscreenButton=true] - Show a fullscreen control.
+     * @returns {LiveFramePresenter} Ordered presenter for host-supplied frames.
+     */
+    startLivePresentation(options = {}) {
+        if (this.livePresenter) return this.livePresenter;
+
+        this.setControlsVisible(false);
+        this.el.logo.classList.add('marp-hidden');
+        this.el.centerOverlay.classList.add('marp-hidden');
+        this.el.spinner.classList.add('marp-hidden');
+        this.root.classList.add('marp-live-player');
+
+        const status = this.document.createElement('div');
+        status.className = 'marp-live-status';
+        status.setAttribute('aria-live', 'polite');
+        this.root.appendChild(status);
+
+        const progress = this.document.createElement('progress');
+        progress.className = 'marp-live-progress';
+        progress.max = 1;
+        progress.value = 0;
+        progress.setAttribute('aria-label', 'Inference range progress');
+        this.root.appendChild(progress);
+
+        const context = this.document.createElement('div');
+        context.className = 'marp-live-context';
+        this.root.appendChild(context);
+
+        if (options.fullscreenButton !== false) {
+            const fullscreen = this.document.createElement('button');
+            fullscreen.className = 'marp-live-fullscreen';
+            fullscreen.type = 'button';
+            fullscreen.textContent = '⛶';
+            fullscreen.setAttribute('aria-label', 'Toggle fullscreen');
+            fullscreen.addEventListener('click', () => this.toggleFullscreen());
+            this.root.appendChild(fullscreen);
+        }
+
+        this.livePresenter = new LiveFramePresenter(this.el.canvas, {
+            statusElement: status,
+            progressElement: progress,
+            contextElement: context,
+        });
+        return this.livePresenter;
     }
 
     /**
