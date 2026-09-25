@@ -87,8 +87,8 @@ export function buildPlayerMarkup(options = {}) {
 
             <div class="marp-controls-row">
                 <button id="playPauseButton" class="marp-play-pause" type="button" disabled>&#9654;</button>
-                <button id="stepBackButton" class="marp-step marp-step-back" type="button" disabled>&laquo; Step</button>
-                <button id="stepForwardButton" class="marp-step marp-step-forward" type="button" disabled>Step &raquo;</button>
+                <button id="stepBackButton" class="marp-step marp-step-back" type="button" aria-label="Step back" disabled>&laquo;<span class="marp-step-word"> Step</span></button>
+                <button id="stepForwardButton" class="marp-step marp-step-forward" type="button" aria-label="Step forward" disabled><span class="marp-step-word">Step </span>&raquo;</button>
                 <span id="timeDisplay" class="marp-time">--:-- / --:--</span>
                 <span id="speedDisplay" class="marp-speed">1x</span>
                 <div class="marp-spacer"></div>
