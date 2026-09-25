@@ -37,6 +37,15 @@ const FETCH_TIMEOUT_MS = 60000;
 const DEFAULT_RAW_CACHE_BUDGET_BYTES = 3 * 1024 * 1024 * 1024;
 
 /**
+ * How full the raw cache may get before background prefetching stops.
+ *
+ * Short of 1 so fetches already in flight land without forcing an eviction: a cache
+ * that fills and then evicts to fit a prefetch will evict something nearer the playhead
+ * and fetch it again, for ever -- which is what a 128 MB phone cache did.
+ */
+const RAW_BUDGET_FILL_FRACTION = 0.9;
+
+/**
  * Fetches a URL with a timeout, so a genuinely stuck network request fails
  * with a clear, actionable error instead of hanging forever with no signal
  * -- confirmed live that segment fetch time over a slow connection to a
@@ -408,6 +417,19 @@ export class SegmentFetcher {
             }
         }
         return count;
+    }
+
+    /**
+     * Whether the raw cache is full enough that background prefetching should stop.
+     *
+     * The protected floor around the playhead is always fetched regardless; this only
+     * ends the opportunistic frontier, which otherwise fetched, evicted and re-fetched
+     * without end once the budget was smaller than the video.
+     *
+     * @returns {boolean} True once the cache holds {@link RAW_BUDGET_FILL_FRACTION} of its budget.
+     */
+    isRawBudgetFull() {
+        return this._rawSegmentBytes >= this.maxRawCacheBytes * RAW_BUDGET_FILL_FRACTION;
     }
 
     /**
