@@ -3,6 +3,16 @@
 Notable changes to marp-video-player. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.5.3]
+
+### Fixed
+- The controls row fits a phone. It needed about 440px once a video's time
+  was showing, so on a phone Android Chrome widened the whole page to fit
+  it: the page zoomed out, the fullscreen button went off the edge, the time
+  overlapped the step buttons and the settings menu opened partly off
+  screen. Touch screens now drop the volume slider, and phone widths drop
+  the step buttons' words, stack the time and tighten the buttons.
+
 ## [0.5.2]
 
 ### Fixed
