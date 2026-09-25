@@ -3,6 +3,16 @@
 Notable changes to marp-video-player. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.5.1]
+
+### Fixed
+- Background prefetching stops once the raw cache is full. It went on
+  launching fetches the cache then evicted to make room, so with a budget
+  smaller than the video it never stopped: a phone with a 128 MB cache,
+  paused, downloaded 530 MB in thirty seconds and decoded as it went, until
+  the whole device froze. The segments around the playhead are still always
+  fetched.
+
 ## [0.5.0]
 
 ### Added
