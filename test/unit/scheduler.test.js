@@ -1592,3 +1592,60 @@ describe('Scheduler#close', () => {
         jest.useRealTimers();
     });
 });
+
+describe('Scheduler#_runCachePass stops prefetching when the raw cache is full', () => {
+    /**
+     * Runs one paused cache pass with the fetcher reporting `full`, and answers which
+     * segments it asked for and which were the protected floor.
+     *
+     * @param {boolean} full - What the fetcher's isRawBudgetFull() answers.
+     * @returns {{asked: number[], protectedFloor: number[]}} The fetches launched, and the floor.
+     */
+    function runPass(full) {
+        const asked = [];
+        let protectedFloor = [];
+        const frameStore = {
+            buffers: new Map(),
+            has: () => false,
+            isDecodeInBackoff: () => false,
+            ensureDecoded: () => Promise.resolve(),
+            setPinned: () => {},
+            setEvictionPriority: () => {},
+            pinned: new Set(),
+            maxSegmentsBuffered: 4,
+            segmentFetcher: {
+                hasRawBytes: () => false,
+                isFetchInBackoff: () => false,
+                hasInFlightFetch: () => false,
+                getInFlightFetchCount: () => 0,
+                isBehindCoverageGap: () => false,
+                isRawBudgetFull: () => full,
+                ensureRawBytes: (index) => { asked.push(index); return Promise.resolve(); },
+                setProtectedRawSegments: (indices) => { protectedFloor = [...indices]; },
+            },
+        };
+        const scheduler = new Scheduler({
+            segmentIndex: makeUniformSegmentIndex(40, 2),
+            frameStore,
+            canvasRenderer: { onFramePresented: () => {}, render: () => true, canvas: { width: 0, height: 0 } },
+            emit: () => {},
+            maxConcurrentTier1Fetches: 100,
+        });
+        scheduler.currentSegmentIndex = 20;
+        scheduler._runCachePass(40, { symmetric: true });
+        return { asked, protectedFloor };
+    }
+
+    test('fetches only the protected floor once the cache is full', () => {
+        const { asked, protectedFloor } = runPass(true);
+
+        expect(asked.length).toBeGreaterThan(0);
+        expect(asked.every((index) => protectedFloor.includes(index))).toBe(true);
+    });
+
+    test('reaches beyond the floor while there is room', () => {
+        const { asked, protectedFloor } = runPass(false);
+
+        expect(asked.some((index) => !protectedFloor.includes(index))).toBe(true);
+    });
+});
