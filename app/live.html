@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MARP live inference</title>
+    <style>
+        html, body, #player { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #01050d; }
+        body { display: flex; align-items: center; justify-content: center; }
+    </style>
+</head>
+<body>
+    <div id="player"></div>
+    <script src="dist/marp-video-player.standalone.js"></script>
+    <script>
+        (() => {
+            const player = MarpVideoEngine.createMarpVideoPlayer(document.getElementById('player'), {
+                aspectRatio: null,
+                maxWidth: null,
+                controls: false,
+                input: false,
+                muted: true,
+            });
+            const presenter = player.startLivePresentation();
+            let latestPacket = null;
+            let redrawInProgress = false;
+            let renderProofSent = false;
+
+            function decodeBase64(value, type) {
+                const binary = atob(value);
+                const bytes = new Uint8Array(binary.length);
+                for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+                return new Blob([bytes], { type });
+            }
+
+            async function presentPacket(packet) {
+                const bitmap = await createImageBitmap(decodeBase64(packet.image, packet.content_type));
+                try {
+                    await presenter.present({
+                            frame: bitmap,
+                            frameNumber: packet.frame_number,
+                            tracks: packet.tracks,
+                            rangeStart: packet.range_start,
+                            rangeEnd: packet.range_end,
+                            jobId: packet.job_id,
+                            modelName: packet.model_name,
+                            speciesNames: packet.species_names,
+                    });
+                    if (!renderProofSent) {
+                        const canvas = document.querySelector('.marp-canvas');
+                        const proof = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+                        if (proof) {
+                            await fetch('/render-proof', { method: 'POST', body: proof });
+                            renderProofSent = true;
+                        }
+                    }
+                } finally {
+                    bitmap.close();
+                }
+            }
+
+            async function redrawLatest() {
+                if (!latestPacket || redrawInProgress) return;
+                redrawInProgress = true;
+                try {
+                    await presentPacket(latestPacket);
+                } finally {
+                    redrawInProgress = false;
+                }
+            }
+
+            window.addEventListener('focus', redrawLatest);
+            window.addEventListener('pageshow', redrawLatest);
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') redrawLatest();
+            });
+
+            async function run() {
+                let acknowledgedFrame = null;
+                while (true) {
+                    const response = await fetch('/next', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ acknowledged_frame: acknowledgedFrame }),
+                    });
+                    if (response.status === 204 || response.status === 410) return;
+                    if (!response.ok) throw new Error(`live frame request returned ${response.status}`);
+
+                    const packet = await response.json();
+                    latestPacket = packet;
+                    await presentPacket(packet);
+                    acknowledgedFrame = packet.frame_number;
+                }
+            }
+
+            run().catch((error) => {
+                // The job continues if its display disappears. Keep the page
+                // quiet and let the child record the single useful warning.
+                console.warn(error);
+            });
+        })();
+    </script>
+</body>
+</html>

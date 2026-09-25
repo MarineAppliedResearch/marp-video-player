@@ -32,6 +32,7 @@ import { MediaSource } from './media-source.js';
 import { getQualityOptions } from './quality-options.js';
 import { PLAYER_CSS } from './ui/styles.js';
 import { encodeSegmentStates, encodeSegmentGeometry, SEGMENT_FETCHED, SEGMENT_DECODED, SEGMENT_PINNED } from './segment-encoding.js';
+import { createMarpLiveFramePresenter, LiveFramePresenter } from './live-frame-presenter.js';
 
 /**
  * This build's version, matching the published package version.
@@ -69,4 +70,6 @@ export {
     SEGMENT_FETCHED,
     SEGMENT_DECODED,
     SEGMENT_PINNED,
+    createMarpLiveFramePresenter,
+    LiveFramePresenter,
 };

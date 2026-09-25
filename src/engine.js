@@ -22,6 +22,7 @@ import { MarpVideoShim } from './marp-video-shim.js';
 import { AudioUnitDecoder } from './audio-decoder.js';
 import { AudioStore } from './audio-store.js';
 import { AudioOutput } from './audio-output.js';
+import { openingPosition } from './playlist-manager.js';
 
 
 
@@ -39,6 +40,7 @@ import { AudioOutput } from './audio-output.js';
  * @param {Object} [options.fetchOptions] - Extra fetch() options (e.g. `{headers: {Authorization: 'Bearer ...'}}`) applied to every request this engine makes.
  * @param {number} [options.cacheBudgetBytes] - Decoded-frame LRU cache budget in bytes. Default 3 GiB.
  * @param {number} [options.rawSegmentCacheBudgetBytes] - Raw-segment cache budget in bytes. Default 3 GiB.
+ * @param {number} [options.startTime] - Seconds into the media to open at. The first unit fetched and decoded is the one holding this moment, not the first of the file, so opening deep into a long video costs the bytes around that moment and nothing before it. Default 0.
  * @param {number} [options.maxConcurrentFetches] - Ceiling on simultaneously in-flight raw segment fetches. Default 6, suitable for a source that supports true random access (e.g. a static file server). A source backed by a single sequential live producer (e.g. Jellyfin's on-the-fly HLS transcoder) should pass a much lower value -- see scheduler.js's DEFAULT_MAX_CONCURRENT_TIER1_FETCHES doc comment for why.
  * @returns {Promise<Object>} A {@link module:video-engine/marp-video-shim.MarpVideoShim} instance.
  * @throws {Error} When the stream can't be loaded or the first segment decodes zero frames.
@@ -100,17 +102,22 @@ export async function createMarpVideoEngine(canvas, options) {
     const segmentFetcher = mediaSource.segmentFetcher;
     const gopDecoder = new GopDecoder();
 
-    // Demux+decode the first segment up front, both to display an initial
+    // Where to open: the unit holding startTime, or unit 0 when none was asked for.
+    const { startTime, unitIndex: firstUnit } = openingPosition(segmentIndex, options.startTime);
+
+    // Demux+decode the opening unit up front, both to display an initial
     // frame and to learn the real negotiated width/height/fps the LRU
-    // cache's memory-budget formula needs -- never guessed/hardcoded.
-    console.log('[video-engine] fetching first segment...');
-    await segmentFetcher.fetchSegment(0);
+    // cache's memory-budget formula needs -- never guessed/hardcoded. It is
+    // the unit holding startTime, so a caller opening at a moment never pays
+    // for, or shows, the start of the file first.
+    console.log(`[video-engine] fetching opening segment ${firstUnit}...`);
+    await segmentFetcher.fetchSegment(firstUnit);
 
-    console.log('[video-engine] demuxing first segment...');
-    const { unitFirstTimestampMicros: _firstUnitStart, ...firstDemux } = await mediaSource.fetchChunks(0);
+    console.log('[video-engine] demuxing opening segment...');
+    const { unitFirstTimestampMicros: _firstUnitStart, ...firstDemux } = await mediaSource.fetchChunks(firstUnit);
 
-    console.log('[video-engine] decoding first segment...');
-    const firstGopBuffer = await gopDecoder.decodeSegment(0, firstDemux);
+    console.log('[video-engine] decoding opening segment...');
+    const firstGopBuffer = await gopDecoder.decodeSegment(firstUnit, firstDemux);
     console.log(`[video-engine] first segment decoded: ${firstGopBuffer.frames.length} frames`);
 
     if (firstGopBuffer.frames.length === 0) {
@@ -120,7 +127,7 @@ export async function createMarpVideoEngine(canvas, options) {
     const firstFrame = firstGopBuffer.frames[0];
     const videoWidth = firstFrame.displayWidth;
     const videoHeight = firstFrame.displayHeight;
-    const fps = Math.round(firstGopBuffer.frames.length / segmentIndex.segments[0].duration);
+    const fps = Math.round(firstGopBuffer.frames.length / segmentIndex.segments[firstUnit].duration);
 
     const frameStore = new FrameStore({
         segmentFetcher,
@@ -153,8 +160,8 @@ export async function createMarpVideoEngine(canvas, options) {
     });
 
     // Seed the cache with the segment already decoded above rather than
-    // discarding it and re-decoding on the first seek(0) below.
-    frameStore.buffers.set(0, firstGopBuffer);
+    // discarding it and re-decoding on the first seek below.
+    frameStore.buffers.set(firstUnit, firstGopBuffer);
 
     const canvasRenderer = new CanvasRenderer(canvas);
 
@@ -267,7 +274,7 @@ export async function createMarpVideoEngine(canvas, options) {
     // Prime the first displayed frame and fire the initial metadata
     // events, matching a real <video> element's loadedmetadata/
     // durationchange/resize timing on first load.
-    await scheduler.seek(0);
+    await scheduler.seek(startTime);
     shim._dispatch('loadedmetadata');
     shim._dispatch('durationchange');
     shim._dispatch('resize');

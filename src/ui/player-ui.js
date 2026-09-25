@@ -21,6 +21,7 @@
  */
 
 import { createMarpVideoEngine } from '../index.js';
+import { LiveFramePresenter } from '../live-frame-presenter.js';
 import { JellyfinClient } from '../jellyfin-client.js';
 import { JellyfinMediaSource } from '../media-source-jellyfin-transcode.js';
 import { LocalFileMediaSource } from '../media-source-local.js';
@@ -528,9 +529,11 @@ export class MarpVideoPlayer {
      * @async
      * @param {string} itemId - Jellyfin item id.
      * @param {Object} [qualityOption] - A tier from probeQualityOptions(); the first tier when omitted.
+     * @param {Object} [options]
+     * @param {number} [options.startTime] - Seconds to open at; the unit holding it is fetched first. Default 0.
      * @returns {Promise<Object|null>} The loaded engine, or null on failure.
      */
-    async loadItem(itemId, qualityOption) {
+    async loadItem(itemId, qualityOption, { startTime } = {}) {
         if (!this._checkWebCodecs()) {
             return null;
         }
@@ -580,6 +583,7 @@ export class MarpVideoPlayer {
                 mediaSource: built.mediaSource,
                 maxConcurrentFetches: built.maxConcurrentFetches,
                 rawSegmentCacheBudgetBytes: rawCacheBudgetBytes,
+                startTime,
             });
 
             this._afterLoad();
@@ -602,9 +606,11 @@ export class MarpVideoPlayer {
      *
      * @async
      * @param {File} file - File from the picker or a drop.
+     * @param {Object} [options]
+     * @param {number} [options.startTime] - Seconds to open at; the unit holding it is fetched first. Default 0.
      * @returns {Promise<Object|null>} The loaded engine, or null on failure.
      */
-    async loadFile(file) {
+    async loadFile(file, { startTime } = {}) {
         if (!this._checkWebCodecs()) {
             return null;
         }
@@ -618,6 +624,7 @@ export class MarpVideoPlayer {
             this.currentItemId = null;
             this.currentQualityOption = null;
             this.engine = await createMarpVideoEngine(this.el.canvas, {
+                startTime,
                 rawSegmentCacheBudgetBytes: this._rawCacheBudgetBytes(),
                 mediaSource: new LocalFileMediaSource({
                     file,
@@ -656,9 +663,11 @@ export class MarpVideoPlayer {
      *
      * @async
      * @param {string} url - Media URL.
+     * @param {Object} [options]
+     * @param {number} [options.startTime] - Seconds to open at; the unit holding it is fetched first. Default 0.
      * @returns {Promise<Object|null>} The loaded engine, or null on failure.
      */
-    async loadUrl(url) {
+    async loadUrl(url, { startTime } = {}) {
         if (!this._checkWebCodecs()) {
             return null;
         }
@@ -673,9 +682,9 @@ export class MarpVideoPlayer {
 
             this.currentItemId = null;
             this.currentQualityOption = null;
-            this.engine = await createMarpVideoEngine(
-                this.el.canvas,
-                isHls
+            this.engine = await createMarpVideoEngine(this.el.canvas, {
+                startTime,
+                ...(isHls
                     ? {
                           streamUrl: url,
                           rawSegmentCacheBudgetBytes,
@@ -692,8 +701,8 @@ export class MarpVideoPlayer {
                               onDebug: (message) => this.log(message),
                               onError: (err) => this.log(`ERROR (media source): ${err.message}`),
                           }),
-                      }
-            );
+                      }),
+            });
 
             this.el.qualityList.innerHTML = '';
             const note = this.document.createElement('span');
@@ -926,7 +935,9 @@ export class MarpVideoPlayer {
             button.addEventListener('click', () => {
                 const itemId = this.el.itemId.value.trim() || this.currentItemId;
                 if (itemId) {
-                    this.loadItem(itemId, option);
+                    // Changing quality keeps the place rather than starting over.
+                    const startTime = this.engine ? this.engine.currentTime : 0;
+                    this.loadItem(itemId, option, { startTime });
                 }
             });
             this.el.qualityList.appendChild(button);
@@ -1253,6 +1264,59 @@ export class MarpVideoPlayer {
             return this.document.exitFullscreen();
         }
         return this.root.requestFullscreen();
+    }
+
+    /**
+     * Turns this player's visual surface into an externally-fed live view.
+     *
+     * The normal engine remains absent because the host already decoded each
+     * frame. The MARP player still owns the canvas, styling and fullscreen.
+     *
+     * @param {Object} [options]
+     * @param {boolean} [options.fullscreenButton=true] - Show a fullscreen control.
+     * @returns {LiveFramePresenter} Ordered presenter for host-supplied frames.
+     */
+    startLivePresentation(options = {}) {
+        if (this.livePresenter) return this.livePresenter;
+
+        this.setControlsVisible(false);
+        this.el.logo.classList.add('marp-hidden');
+        this.el.centerOverlay.classList.add('marp-hidden');
+        this.el.spinner.classList.add('marp-hidden');
+        this.root.classList.add('marp-live-player');
+
+        const status = this.document.createElement('div');
+        status.className = 'marp-live-status';
+        status.setAttribute('aria-live', 'polite');
+        this.root.appendChild(status);
+
+        const progress = this.document.createElement('progress');
+        progress.className = 'marp-live-progress';
+        progress.max = 1;
+        progress.value = 0;
+        progress.setAttribute('aria-label', 'Inference range progress');
+        this.root.appendChild(progress);
+
+        const context = this.document.createElement('div');
+        context.className = 'marp-live-context';
+        this.root.appendChild(context);
+
+        if (options.fullscreenButton !== false) {
+            const fullscreen = this.document.createElement('button');
+            fullscreen.className = 'marp-live-fullscreen';
+            fullscreen.type = 'button';
+            fullscreen.textContent = '⛶';
+            fullscreen.setAttribute('aria-label', 'Toggle fullscreen');
+            fullscreen.addEventListener('click', () => this.toggleFullscreen());
+            this.root.appendChild(fullscreen);
+        }
+
+        this.livePresenter = new LiveFramePresenter(this.el.canvas, {
+            statusElement: status,
+            progressElement: progress,
+            contextElement: context,
+        });
+        return this.livePresenter;
     }
 
     /**

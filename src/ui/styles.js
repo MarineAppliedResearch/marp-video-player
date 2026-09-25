@@ -114,6 +114,63 @@ export const PLAYER_CSS = `
     object-fit: contain;
 }
 
+.marp-player .marp-live-status {
+    position: absolute;
+    left: 12px;
+    bottom: 22px;
+    z-index: 4;
+    padding: 5px 9px;
+    border-radius: 5px;
+    color: rgba(255, 255, 255, 0.92);
+    background: rgba(0, 0, 0, 0.48);
+    font: 600 13px/1.2 system-ui, sans-serif;
+    pointer-events: none;
+}
+
+.marp-player .marp-live-progress {
+    position: absolute;
+    left: 12px;
+    right: 56px;
+    bottom: 8px;
+    z-index: 4;
+    width: calc(100% - 68px);
+    height: 7px;
+    accent-color: rgba(54, 201, 255, 0.92);
+    pointer-events: none;
+}
+
+.marp-player .marp-live-context {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 55px;
+    z-index: 4;
+    padding: 5px 8px;
+    overflow: hidden;
+    border-radius: 5px;
+    color: rgba(255, 255, 255, 0.9);
+    background: rgba(0, 0, 0, 0.42);
+    font: 600 12px/1.3 system-ui, sans-serif;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+.marp-player .marp-live-fullscreen {
+    position: absolute;
+    right: 10px;
+    bottom: 9px;
+    z-index: 5;
+    width: 34px;
+    height: 30px;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 5px;
+    color: white;
+    background: rgba(0, 0, 0, 0.48);
+    cursor: pointer;
+    font-size: 20px;
+}
+
 /* Shown centered over the canvas until the first frame is presented. */
 .marp-player .marp-logo {
     position: absolute;

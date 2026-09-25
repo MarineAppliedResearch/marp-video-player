@@ -43,6 +43,7 @@ const { version } = JSON.parse(readFileSync(path.join(root, 'package.json'), 'ut
 /** Files that go in, relative to the repository root, mapped to their place in the archive. */
 const CONTENTS = [
     ['app/player.html', 'player.html'],
+    ['app/live.html', 'live.html'],
     ['dist/marp-video-player.standalone.js', 'dist/marp-video-player.standalone.js'],
     ['dist/marp-video-player.standalone.js.map', 'dist/marp-video-player.standalone.js.map'],
     ['LICENSE', 'LICENSE'],

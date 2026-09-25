@@ -1,5 +1,25 @@
 # MARP Video Player
 
+<!-- marp:brand start -->
+<!-- Canonical source: MARP/README.md. Do not edit this block in a component repository;
+     edit it here and run `marp harness sync`. -->
+
+<p align="center">
+  <strong>MARP</strong> is the Marine Analysis and Reporting Platform. It carries an ocean
+  survey from the video a dive brings home through to the science: annotation, review,
+  machine-learning assistance, processing and reporting, on a platform an organisation
+  hosts for itself.
+</p>
+
+<p align="center">
+  <a href="https://github.com/MarineAppliedResearch/MARP">Umbrella</a> &middot;
+  <a href="https://github.com/MarineAppliedResearch/MARP_API">API</a> &middot;
+  <a href="https://github.com/MarineAppliedResearch/marp-video-player">Video player</a> &middot;
+  <a href="https://github.com/MarineAppliedResearch/marp-inference-worker">Inference worker</a> &middot;
+  <a href="https://github.com/MarineAppliedResearch/marp-jellyfin">Video server</a>
+</p>
+<!-- marp:brand end -->
+
 <p align="center">
   A <strong>frame-accurate</strong> video player for the browser, built on WebCodecs.<br>
   Real reverse playback, exact frame stepping, and no dependencies to install.
@@ -7,18 +27,18 @@
 
 <p align="center">
   <a href="https://www.npmjs.com/package/marp-video-player"><img alt="npm" src="https://img.shields.io/npm/v/marp-video-player?color=cb3837&logo=npm"></a>
-  <img alt="Project status" src="https://img.shields.io/badge/status-internal%20production%20%7C%20active%20development-0b7285">
+  <img alt="Project status" src="https://img.shields.io/badge/status-internal%20production%20%7C%20active%20development-05b9c8">
   <img alt="WebCodecs" src="https://img.shields.io/badge/WebCodecs-decoding-ff6f00">
   <img alt="Runtime dependencies" src="https://img.shields.io/badge/runtime%20dependencies-none-2ea043">
   <img alt="Network at load" src="https://img.shields.io/badge/network%20at%20load-none-2ea043">
-  <img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-a7e735">
+  <img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-a7ec35">
 </p>
 
 <table width="100%">
   <tr>
     <td align="center" bgcolor="#03101f">
       <br>
-      <img src="assets/marp-mark.png" alt="MARP" width="180">
+      <img src="assets/marp-logo.png" alt="MARP logo" width="430">
       <br><br>
     </td>
   </tr>
@@ -258,8 +278,8 @@ Open the folder and use **Run and Debug** (<kbd>F5</kbd>):
 | Configuration | What it does |
 | --- | --- |
 | Open player in browser | Rebuilds, starts the server, opens the player |
-| Run unit tests | 280 tests, no dependencies |
-| Run browser tests | 50 tests in a real browser |
+| Run unit tests | Fast, no dependencies — the working loop |
+| Run browser tests | The slow tier, in a real browser |
 | Build library | The three bundles into `dist/` |
 | Build docs | JSDoc reference into `docs/generated/` |
 
@@ -321,7 +341,7 @@ This player is one component of [MARP](https://github.com/MarineAppliedResearch/
 | Component | Purpose |
 | --- | --- |
 | [MARP](https://github.com/MarineAppliedResearch/MARP) | Platform umbrella: architecture, deployment, and the component registry |
-| [MARE_API](https://github.com/MarineAppliedResearch/MARE_API) | API and application backend |
+| [marp-api](https://github.com/MarineAppliedResearch/MARP_API) | API and application backend |
 | [marp-jellyfin](https://github.com/MarineAppliedResearch/marp-jellyfin) | Video server |
 | [marp-inference-worker](https://github.com/MarineAppliedResearch/marp-inference-worker) | Machine-learning inference |
 | **marp-video-player** | This repository |
@@ -334,7 +354,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Project governance is documented in the 
 
 ## History
 
-Extracted from [`MARE_API`](https://github.com/MarineAppliedResearch/MARE_API), where it was developed as `video-engine/`. Commit history before the extraction is in that repository.
+Extracted from [`MARP_API`](https://github.com/MarineAppliedResearch/MARP_API), where it was developed as `video-engine/`. Commit history before the extraction is in that repository.
 
 ## License
 
