@@ -3,6 +3,21 @@
 Notable changes to marp-video-player. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.5.0]
+
+### Added
+- Opening at a given time. `createMarpVideoEngine(canvas, { startTime })`, and
+  `loadItem`, `loadUrl` and `loadFile` with `{ startTime }`, fetch and decode the
+  unit holding that moment first. The engine always began with unit 0 and then
+  seeked, so opening deep into a long dive paid for the start of the file first
+  and showed its first frame -- which, on a phone, was the moment it ran out of
+  memory.
+- The live watch-mode surface the inference worker's watch window draws with.
+
+### Changed
+- Changing quality from the settings menu keeps the place instead of starting
+  the video over.
+
 ## [0.3.2]
 
 ### Fixed
