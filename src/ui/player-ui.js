@@ -529,9 +529,11 @@ export class MarpVideoPlayer {
      * @async
      * @param {string} itemId - Jellyfin item id.
      * @param {Object} [qualityOption] - A tier from probeQualityOptions(); the first tier when omitted.
+     * @param {Object} [options]
+     * @param {number} [options.startTime] - Seconds to open at; the unit holding it is fetched first. Default 0.
      * @returns {Promise<Object|null>} The loaded engine, or null on failure.
      */
-    async loadItem(itemId, qualityOption) {
+    async loadItem(itemId, qualityOption, { startTime } = {}) {
         if (!this._checkWebCodecs()) {
             return null;
         }
@@ -581,6 +583,7 @@ export class MarpVideoPlayer {
                 mediaSource: built.mediaSource,
                 maxConcurrentFetches: built.maxConcurrentFetches,
                 rawSegmentCacheBudgetBytes: rawCacheBudgetBytes,
+                startTime,
             });
 
             this._afterLoad();
@@ -603,9 +606,11 @@ export class MarpVideoPlayer {
      *
      * @async
      * @param {File} file - File from the picker or a drop.
+     * @param {Object} [options]
+     * @param {number} [options.startTime] - Seconds to open at; the unit holding it is fetched first. Default 0.
      * @returns {Promise<Object|null>} The loaded engine, or null on failure.
      */
-    async loadFile(file) {
+    async loadFile(file, { startTime } = {}) {
         if (!this._checkWebCodecs()) {
             return null;
         }
@@ -619,6 +624,7 @@ export class MarpVideoPlayer {
             this.currentItemId = null;
             this.currentQualityOption = null;
             this.engine = await createMarpVideoEngine(this.el.canvas, {
+                startTime,
                 rawSegmentCacheBudgetBytes: this._rawCacheBudgetBytes(),
                 mediaSource: new LocalFileMediaSource({
                     file,
@@ -657,9 +663,11 @@ export class MarpVideoPlayer {
      *
      * @async
      * @param {string} url - Media URL.
+     * @param {Object} [options]
+     * @param {number} [options.startTime] - Seconds to open at; the unit holding it is fetched first. Default 0.
      * @returns {Promise<Object|null>} The loaded engine, or null on failure.
      */
-    async loadUrl(url) {
+    async loadUrl(url, { startTime } = {}) {
         if (!this._checkWebCodecs()) {
             return null;
         }
@@ -674,9 +682,9 @@ export class MarpVideoPlayer {
 
             this.currentItemId = null;
             this.currentQualityOption = null;
-            this.engine = await createMarpVideoEngine(
-                this.el.canvas,
-                isHls
+            this.engine = await createMarpVideoEngine(this.el.canvas, {
+                startTime,
+                ...(isHls
                     ? {
                           streamUrl: url,
                           rawSegmentCacheBudgetBytes,
@@ -693,8 +701,8 @@ export class MarpVideoPlayer {
                               onDebug: (message) => this.log(message),
                               onError: (err) => this.log(`ERROR (media source): ${err.message}`),
                           }),
-                      }
-            );
+                      }),
+            });
 
             this.el.qualityList.innerHTML = '';
             const note = this.document.createElement('span');
@@ -927,7 +935,9 @@ export class MarpVideoPlayer {
             button.addEventListener('click', () => {
                 const itemId = this.el.itemId.value.trim() || this.currentItemId;
                 if (itemId) {
-                    this.loadItem(itemId, option);
+                    // Changing quality keeps the place rather than starting over.
+                    const startTime = this.engine ? this.engine.currentTime : 0;
+                    this.loadItem(itemId, option, { startTime });
                 }
             });
             this.el.qualityList.appendChild(button);

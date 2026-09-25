@@ -11,7 +11,7 @@
  * @module video-engine/test/unit/playlist-manager.test
  */
 
-const { parseMasterPlaylist, parseMediaPlaylist, findSegmentForTime } = require('../../src/playlist-manager.js');
+const { parseMasterPlaylist, parseMediaPlaylist, findSegmentForTime, openingPosition } = require('../../src/playlist-manager.js');
 
 /** Arbitrary but realistic master playlist URL, used to verify relative-URI resolution. */
 const BASE_URL = 'https://jellyfin.example.com/videos/master.m3u8';
@@ -97,3 +97,38 @@ describe('findSegmentForTime', () => {
         expect(findSegmentForTime(segmentIndex, 6.1).index).toBe(2);
     });
 });
+
+/**
+ * A two-second-unit index of the given length, in the shape the engine reads.
+ *
+ * @param {number} count - How many units.
+ * @returns {Object} A SegmentIndex.
+ */
+function uniformIndex(count) {
+    const segments = Array.from({ length: count }, (_, index) => ({
+        index, startTime: index * 2, endTime: index * 2 + 2, duration: 2,
+    }));
+
+    return { segments, totalDuration: count * 2 };
+}
+
+describe('openingPosition', () => {
+    test('opens on the unit holding the time asked for, not the first unit', () => {
+        expect(openingPosition(uniformIndex(10), 7.5)).toEqual({ startTime: 7.5, unitIndex: 3 });
+    });
+
+    test('opens at the start when no time, or no usable time, is given', () => {
+        for (const requested of [undefined, null, 0, -4, Number.NaN, 'soon']) {
+            expect(openingPosition(uniformIndex(10), requested)).toEqual({ startTime: 0, unitIndex: 0 });
+        }
+    });
+
+    test('keeps a time past the end inside the media, on its last unit', () => {
+        const opened = openingPosition(uniformIndex(10), 999);
+
+        expect(opened.unitIndex).toBe(9);
+        expect(opened.startTime).toBeLessThan(20);
+        expect(opened.startTime).toBeGreaterThan(19.99);
+    });
+});
+

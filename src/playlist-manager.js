@@ -226,6 +226,32 @@ export async function loadSegmentIndex(streamUrl, { fetchOptions } = {}) {
 }
 
 /**
+ * Where an engine opens: the time, clamped inside the media, and the unit holding it.
+ *
+ * An engine used to fetch and decode unit 0 whatever it was asked to show, then seek, so
+ * opening an observation deep into a dive paid for the start of the file first and showed
+ * its first frame. A caller that names a start time gets the unit holding that moment
+ * instead. A missing, non-numeric or negative time is 0, which is what every caller got
+ * before the option existed.
+ *
+ * @param {Object} segmentIndex - SegmentIndex from {@link loadSegmentIndex}.
+ * @param {number} [requested] - The start time asked for, in seconds.
+ * @returns {{startTime: number, unitIndex: number}} Where to open.
+ */
+export function openingPosition(segmentIndex, requested) {
+    const asked = Number(requested);
+
+    if (!Number.isFinite(asked) || asked <= 0) {
+        return { startTime: 0, unitIndex: 0 };
+    }
+
+    // Just inside the end, so a time past it opens on the last frame rather than nowhere.
+    const startTime = Math.min(asked, Math.max(0, segmentIndex.totalDuration - 0.001));
+
+    return { startTime, unitIndex: findSegmentForTime(segmentIndex, startTime).index };
+}
+
+/**
  * Locates the segment covering a given time.
  *
  * Uses a fast uniform-duration guess, verified (not trusted) against the

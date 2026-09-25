@@ -215,13 +215,28 @@ clone, check out the branch, and it is already isolated.
 
 ```bash
 marp agent start marp-api 72-unrendered-states   # when you need the isolation
-marp agent list                                  # what is set up, and on which ports
+marp agent list                                  # what is set up, and which are running
+marp agent stop 72-unrendered-states             # keeps the working copy and the branch
+marp agent stop --all                            # every one, when you do not know whose
 marp agent remove 72-unrendered-states           # keeps the branch
 ```
 
-**Stop what you start.** A server outliving its work is not untidiness — one left running
-in another checkout was adopted by a different workspace's browser tests, which then graded
-that checkout's code for an hour without saying so.
+**Stop what you start, and stop it in the message where you report.** A server outliving
+its work is not untidiness — one left running in another checkout was adopted by a
+different workspace's browser tests, which then graded that checkout's code for an hour
+without saying so.
+
+The per-branch form is the one nobody runs, because whoever finds the leftovers does not
+know which branch owns them — so `marp agent stop --all` exists and is the right thing to
+type when in doubt. It stops servers only: working copies, databases and branches all
+survive, and `marp agent start` on the same branch picks up where it left off. `marp agent
+list` marks what is still listening and says so at the end, which is the place this gets
+noticed.
+
+**A stale `postmaster.pid` is not a running server.** A database killed without a clean
+shutdown leaves the lock file behind, so anything that counts those files over-reports
+badly — this workspace once looked like eleven live servers when three were up. Count what
+is listening on a port.
 
 `marp harness check` reports when two workspaces collide: the same port is a failure, an
 exclusive resource named twice in `needs:` is a failure, and two agents on one repository
