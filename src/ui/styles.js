@@ -407,6 +407,70 @@ export const PLAYER_CSS = `
     cursor: default;
 }
 
+/* A touch screen has volume buttons of its own; the slider only took room
+   the row does not have. Mute stays. */
+@media (pointer: coarse) {
+    .marp-player .marp-volume-slider {
+        display: none;
+    }
+}
+
+/* --- A phone-width row. At full size it needs about 440px, so on a phone it
+   ran past the player and Android Chrome widened the whole page to fit it:
+   the page zoomed out, the fullscreen button went off the edge, and the
+   settings menu opened partly off screen. Here nothing may shrink into its
+   neighbour, the step buttons drop their word, and the time stacks. --- */
+@media (max-width: 480px) {
+    .marp-player .marp-controls-row {
+        gap: 2px;
+    }
+
+    .marp-player .marp-controls-row > * {
+        flex-shrink: 0;
+    }
+
+    .marp-player .marp-controls-row > .marp-spacer {
+        flex-shrink: 1;
+        min-width: 0;
+    }
+
+    .marp-player .marp-controls-row button {
+        min-width: 36px;
+        padding: 6px 4px;
+        font-size: 22px;
+    }
+
+    .marp-player .marp-controls-row .marp-step {
+        min-width: 36px;
+        font-size: 18px;
+    }
+
+    .marp-player .marp-step-word {
+        display: none;
+    }
+
+    /* Current time over duration: it wraps at the space after the slash. */
+    .marp-player .marp-time {
+        white-space: normal;
+        max-width: 13ch;
+        line-height: 1.15;
+        font-size: 11px;
+    }
+}
+
+/* The smallest phones, 320px wide: a few pixels more off every button. */
+@media (max-width: 340px) {
+    .marp-player .marp-controls-row {
+        gap: 0;
+    }
+
+    .marp-player .marp-controls-row button,
+    .marp-player .marp-controls-row .marp-step {
+        min-width: 32px;
+        padding: 6px 2px;
+    }
+}
+
 /* The browser is withholding sound until someone interacts with the page.
    Dimmed rather than hidden: the control still works, and its tooltip says
    what is going on. */
