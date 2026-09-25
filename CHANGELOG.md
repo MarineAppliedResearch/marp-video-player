@@ -3,6 +3,15 @@
 Notable changes to marp-video-player. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.5.2]
+
+### Fixed
+- `decodedCacheGiB` now sets the budget the engine is built with. It only set
+  the Advanced field, so every engine started at the 5 GiB default and a host
+  could shrink it only after the load, by which point a phone had already
+  decoded past what it could hold. A host that sets no budget still gets the
+  default.
+
 ## [0.5.1]
 
 ### Fixed
