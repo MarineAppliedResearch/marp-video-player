@@ -1002,6 +1002,15 @@ export class Scheduler {
             }
         }
 
+        // A full cache ends the background frontier. Without this the pass went
+        // on launching fetches the cache then evicted to make room for, and
+        // with a budget smaller than the video it never stopped: a paused phone
+        // downloaded and decoded without end until the whole device choked. The
+        // protected floor above is still fetched; only reaching further stops.
+        if (typeof fetcher.isRawBudgetFull === 'function' && fetcher.isRawBudgetFull()) {
+            return;
+        }
+
         // Whether each side of the playhead has hit something it cannot
         // fetch yet. Once a side is blocked, this pass stops considering
         // candidates further out on that side instead of stepping over

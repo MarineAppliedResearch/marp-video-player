@@ -610,3 +610,16 @@ describe('SegmentFetcher dual-session anchor routing', () => {
         expect(global.fetch).toHaveBeenCalledTimes(1); // no re-fetch, no eviction
     });
 });
+
+describe('SegmentFetcher#isRawBudgetFull', () => {
+    test('says full once the cache holds most of its budget, so prefetching can stop', async () => {
+        // Each fake segment is 8 bytes; 90% of a 16-byte budget is 14.4.
+        const fetcher = new SegmentFetcher(SEGMENT_INDEX, { maxRawCacheBytes: 16 });
+
+        await fetcher.fetchSegment(0);
+        expect(fetcher.isRawBudgetFull()).toBe(false);
+
+        await fetcher.fetchSegment(1);
+        expect(fetcher.isRawBudgetFull()).toBe(true);
+    });
+});
