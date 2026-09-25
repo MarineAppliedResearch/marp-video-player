@@ -367,6 +367,25 @@ export class MarpVideoPlayer {
     }
 
     /**
+     * The decoded-frame budget to build an engine with, or undefined for the engine's own.
+     *
+     * Only when the host asked for one with `decodedCacheGiB`. The option used to set the
+     * Advanced field and nothing else: every engine was built at the 5 GiB default and a
+     * host could only shrink it after the load, by which time the engine had already
+     * started decoding at full size -- enough, on a phone, to take the device down.
+     *
+     * @private
+     * @returns {number|undefined} Bytes, or undefined when the host set no budget.
+     */
+    _decodedCacheBudgetBytes() {
+        if (!Number.isFinite(this.options.decodedCacheGiB) || !this.el.decodedCache) {
+            return undefined;
+        }
+        const bytes = Math.floor(parseFloat(this.el.decodedCache.value) * BYTES_PER_GIB);
+        return Number.isFinite(bytes) ? bytes : undefined;
+    }
+
+    /**
      * Guards both load paths: WebCodecs only exists in a secure context, and
      * reaching a dev server over plain http at a LAN address silently removes
      * it -- which otherwise surfaces as a bare "VideoDecoder is not defined"
@@ -580,6 +599,7 @@ export class MarpVideoPlayer {
             });
 
             this.engine = await createMarpVideoEngine(this.el.canvas, {
+                cacheBudgetBytes: this._decodedCacheBudgetBytes(),
                 mediaSource: built.mediaSource,
                 maxConcurrentFetches: built.maxConcurrentFetches,
                 rawSegmentCacheBudgetBytes: rawCacheBudgetBytes,
@@ -624,6 +644,7 @@ export class MarpVideoPlayer {
             this.currentItemId = null;
             this.currentQualityOption = null;
             this.engine = await createMarpVideoEngine(this.el.canvas, {
+                cacheBudgetBytes: this._decodedCacheBudgetBytes(),
                 startTime,
                 rawSegmentCacheBudgetBytes: this._rawCacheBudgetBytes(),
                 mediaSource: new LocalFileMediaSource({
@@ -683,6 +704,7 @@ export class MarpVideoPlayer {
             this.currentItemId = null;
             this.currentQualityOption = null;
             this.engine = await createMarpVideoEngine(this.el.canvas, {
+                cacheBudgetBytes: this._decodedCacheBudgetBytes(),
                 startTime,
                 ...(isHls
                     ? {
