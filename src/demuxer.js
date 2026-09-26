@@ -63,6 +63,26 @@ function getDescriptionBytes(isoFile, trackId) {
  * @returns {Promise<{codec: string, description: (Uint8Array|null), chunks: Array<Object>, audio: ?{codec: string, description: (Uint8Array|null), sampleRate: number, numberOfChannels: number, chunks: Array<Object>}}>} Codec string, description bytes, and chunks in decode order. `audio` is null when the segment has no usable audio track, and otherwise carries that track's decoder config always and its chunks only when `includeAudio` asked for them.
  * @throws {Error} When mp4box reports a demux error, finds no video track, or never fires onReady.
  */
+/**
+ * How far a track's edit list moves its presentation earlier, in the track's own ticks.
+ *
+ * A stream with B-frames stores composition times late by its reorder delay and carries an
+ * edit list saying to present from `media_time` on. Jellyfin's transcode sets it to two
+ * frames (1024 of 12800 ticks); ignoring it made every picture two frames earlier than the
+ * time it was shown at, and made every transcode segment look 0.08 s off its own label.
+ * An empty edit (media_time -1) is a delay, not a start, and is skipped.
+ *
+ * @param {Object} isoFile - The mp4box file, after onReady.
+ * @param {number} trackId - The track.
+ * @returns {number} Ticks to subtract from each sample's composition time; 0 without an edit list.
+ */
+export function presentationOffsetTicks(isoFile, trackId) {
+    const trak = isoFile.getTrackById(trackId);
+    const entries = trak && trak.edts && trak.edts.elst && trak.edts.elst.entries;
+    const start = entries && entries.find((entry) => Number(entry.media_time) >= 0);
+    return start ? Number(start.media_time) : 0;
+}
+
 export function demuxSegment(initSegmentBuffer, segmentBuffer, { includeVideo = true, includeAudio = false } = {}) {
     return new Promise((resolve, reject) => {
         const isoFile = createFile();
@@ -73,6 +93,7 @@ export function demuxSegment(initSegmentBuffer, segmentBuffer, { includeVideo = 
         let audioConfig = null;
         const chunks = [];
         const audioChunks = [];
+        const offsetTicks = new Map();
 
         isoFile.onError = (error) => {
             reject(new Error(`mp4box demux error: ${error}`));
@@ -87,6 +108,7 @@ export function demuxSegment(initSegmentBuffer, segmentBuffer, { includeVideo = 
             }
 
             videoTrackId = videoTrack.id;
+            offsetTicks.set(videoTrackId, presentationOffsetTicks(isoFile, videoTrackId));
             codec = videoTrack.codec;
             description = getDescriptionBytes(isoFile, videoTrackId);
 
@@ -108,6 +130,7 @@ export function demuxSegment(initSegmentBuffer, segmentBuffer, { includeVideo = 
 
             if (audioConfig && includeAudio) {
                 audioTrackId = audioTrack.id;
+                offsetTicks.set(audioTrackId, presentationOffsetTicks(isoFile, audioTrackId));
                 isoFile.setExtractionOptions(audioTrackId, null, { nbSamples: 100000 });
             }
 
@@ -121,11 +144,13 @@ export function demuxSegment(initSegmentBuffer, segmentBuffer, { includeVideo = 
                 return;
             }
 
+            // Presentation time: the composition time less the edit list's start.
+            const offset = offsetTicks.get(trackId) || 0;
             for (const sample of samples) {
                 const timescale = sample.timescale;
                 target.push({
                     type: sample.is_sync ? 'key' : 'delta',
-                    timestamp: Math.round((sample.cts / timescale) * 1e6),
+                    timestamp: Math.round(((sample.cts - offset) / timescale) * 1e6),
                     duration: Math.round((sample.duration / timescale) * 1e6),
                     data: sample.data,
                 });

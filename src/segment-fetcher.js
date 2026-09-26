@@ -576,6 +576,26 @@ export class SegmentFetcher {
     }
 
     /**
+     * Drops a segment's cached raw bytes, so the next ensureRawBytes fetches it again.
+     *
+     * For a segment whose cached bytes came from a different Jellyfin transcode job than
+     * the one now running: a job cold-started partway into a file is shifted (see
+     * unit-assembly.js), so two jobs can hold different moments under the same index.
+     * Fetching again lets the job now running serve it.
+     *
+     * @param {number} segmentIndexNumber - Segment index to drop.
+     * @returns {void}
+     */
+    discardRawBytes(segmentIndexNumber) {
+        const entry = this._rawSegmentCache.get(segmentIndexNumber);
+        if (!entry) {
+            return;
+        }
+        this._rawSegmentBytes -= entry.buffer.byteLength;
+        this._rawSegmentCache.delete(segmentIndexNumber);
+    }
+
+    /**
      * Returns a segment's cached raw bytes, if present.
      *
      * No session-routing staleness check is applied, and none is needed:
