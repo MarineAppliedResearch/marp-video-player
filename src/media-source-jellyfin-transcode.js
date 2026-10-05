@@ -266,11 +266,29 @@ export class JellyfinTranscodeMediaSource {
      * @returns {Promise<Object>} As {@link JellyfinTranscodeMediaSource#fetchChunks}.
      */
     async fetchSegmentChunks(segmentIndexNumber, { refetch = false } = {}) {
+        this.segmentFetcher.advanceWalk(segmentIndexNumber);
         if (refetch) {
             this.segmentFetcher.discardRawBytes(segmentIndexNumber);
         }
-        await this.segmentFetcher.ensureRawBytes(segmentIndexNumber);
+        // A walk's segments come from the job it is walking (see SegmentFetcher#beginWalk).
+        await this.segmentFetcher.ensureRawBytes(segmentIndexNumber, { session: this.segmentFetcher.walkSession() });
         return this.fetchChunks(segmentIndexNumber);
+    }
+
+    /**
+     * The frame store is building a unit from a shifted job: hold fetches that would
+     * restart that job until it is done (see SegmentFetcher#beginWalk).
+     *
+     * @param {number} segmentIndexNumber - The segment the walk starts from.
+     * @returns {void}
+     */
+    beginAssembly(segmentIndexNumber) {
+        this.segmentFetcher.beginWalk(segmentIndexNumber);
+    }
+
+    /** @returns {void} */
+    endAssembly() {
+        this.segmentFetcher.endWalk();
     }
 
     /** @returns {boolean} True once a demuxed unit has shown this stream carries usable audio. */

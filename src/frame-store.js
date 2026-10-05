@@ -28,7 +28,7 @@ import { segmentShiftSeconds, isShifted, unitForTimestamp, unitCoverage, segment
  * shifted by under a GOP needs its own segment plus two more; the rest is room for a gap
  * left between two Jellyfin jobs' segments, each fetched again once.
  */
-const MAX_ASSEMBLY_SEGMENTS = 6;
+const MAX_ASSEMBLY_SEGMENTS = 10;
 
 /**
  * How many units may hold frames while still incomplete, besides the one being built. A
@@ -130,6 +130,10 @@ export class FrameStore {
         // What the last segment decoded for assembly actually held, which predicts where
         // the next moment is better than a shift does (see segmentAfter).
         this._lastDecoded = null;
+
+        // Shifted units are built one at a time: each walks one Jellyfin job forward, and
+        // two walks on one session would restart each other's job.
+        this._assemblyQueue = Promise.resolve();
 
         // Segments whose frames have been filed by their own time, so building a unit
         // does not decode its own segment again when that segment was already decoded
@@ -443,7 +447,48 @@ export class FrameStore {
      * @returns {Promise<Object>} The unit's GopBuffer.
      * @throws {Error} When the unit cannot be covered within MAX_ASSEMBLY_SEGMENTS.
      */
-    async _assemble(unitIndexNumber) {
+    _assemble(unitIndexNumber) {
+        const run = this._assemblyQueue.then(() => this._assembleNow(unitIndexNumber));
+        this._assemblyQueue = run.then(() => undefined, () => undefined);
+        return run;
+    }
+
+    /**
+     * The body of {@link FrameStore#_assemble}, run one unit at a time.
+     *
+     * @async
+     * @param {number} unitIndexNumber - The unit to build.
+     * @returns {Promise<Object>} The unit's GopBuffer.
+     */
+    async _assembleNow(unitIndexNumber) {
+        if (this.buffers.has(unitIndexNumber)) {
+            return this.buffers.get(unitIndexNumber);
+        }
+        let walking = false;
+        try {
+            return await this._assembleWalking(unitIndexNumber, () => {
+                if (!walking && this.mediaSource.beginAssembly) {
+                    walking = true;
+                    this.mediaSource.beginAssembly(unitIndexNumber);
+                }
+            });
+        } finally {
+            if (walking && this.mediaSource.endAssembly) {
+                this.mediaSource.endAssembly();
+            }
+        }
+    }
+
+    /**
+     * Builds a unit, calling `startWalk` the first time a segment other than its own is
+     * needed -- an unshifted unit never walks, so ordinary playback is never held.
+     *
+     * @async
+     * @param {number} unitIndexNumber - The unit to build.
+     * @param {function(): void} startWalk - Starts holding fetches that would restart the job.
+     * @returns {Promise<Object>} The unit's GopBuffer.
+     */
+    async _assembleWalking(unitIndexNumber, startWalk) {
         if (!this._unitIndex) {
             this._unitIndex = this.mediaSource.getUnitIndex();
         }
@@ -465,13 +510,24 @@ export class FrameStore {
             // the first missing moment -- fetched again if this assembly already decoded
             // it, because then the bytes cached for it came from another job.
             const ownFirst = decodedHere.size === 0 && !held && !this._filedSegments.has(unitIndexNumber);
+            const missing = coverage.missingFromSeconds;
+            // Earlier than anything the last job held: never a step backward inside a job
+            // (Jellyfin restarts it there, at a keyframe that can still be after this
+            // moment), but a fresh start at the segment whose own time holds the moment --
+            // it begins at the keyframe before, at or before the moment -- walked forward.
+            const behind = !ownFirst && this._lastDecoded && missing < this._lastDecoded.firstSeconds;
             const segmentNumber = ownFirst
                 ? unitIndexNumber
-                : this._lastDecoded
-                    ? segmentAfter(coverage.missingFromSeconds, this._lastDecoded, unitIndex.segments.length)
-                    : segmentHolding(unitIndex, coverage.missingFromSeconds, this._lastShiftSeconds);
-            const refetch = decodedHere.has(segmentNumber);
+                : behind
+                    ? unitForTimestamp(unitIndex, Math.round(missing * 1e6))
+                    : this._lastDecoded
+                        ? segmentAfter(missing, this._lastDecoded, unitIndex.segments.length)
+                        : segmentHolding(unitIndex, missing, this._lastShiftSeconds);
+            const refetch = behind || decodedHere.has(segmentNumber);
             decodedHere.add(segmentNumber);
+            if (!ownFirst) {
+                startWalk();
+            }
 
             this._logDebug(`unit ${unitIndexNumber}: decoding segment ${segmentNumber}${refetch ? ' again, fetched afresh' : ''}...`);
             const { unitFirstTimestampMicros, ...demuxResult } =
@@ -517,10 +573,12 @@ export class FrameStore {
      * @returns {{segment: number, firstSeconds: number, endSeconds: number}}
      */
     _heldBy(segmentNumber, frames) {
+        const lastFrameSeconds = frames[frames.length - 1].timestamp / 1e6;
         return {
             segment: segmentNumber,
             firstSeconds: frames[0].timestamp / 1e6,
-            endSeconds: frames[frames.length - 1].timestamp / 1e6 + 1 / this._fps,
+            lastFrameSeconds,
+            endSeconds: lastFrameSeconds + 1 / this._fps,
         };
     }
 

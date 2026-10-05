@@ -145,6 +145,17 @@ describe('the assembly rules', () => {
         expect(unitCoverage([...all.slice(0, 20), ...all.slice(30)], unit, FRAME).missingFromSeconds).toBeCloseTo(267.8);
     });
 
+    test('a moment between a segment\'s last frame and the next frame is in the next segment', () => {
+        const { segmentAfter } = require('../../src/unit-assembly.js');
+        // 20260611_161158_Fwd opened at 600 s: unit 199 begins at 598.39, segment 200 of the
+        // job ends with its frame at 598.36, and the next frame, 598.40, is in segment 201.
+        const last = { segment: 200, firstSeconds: 595.4, lastFrameSeconds: 598.36, endSeconds: 598.4 };
+        expect(segmentAfter(598.39, last, 400)).toBe(201);
+        expect(segmentAfter(598.36, last, 400)).toBe(200);
+        expect(segmentAfter(601.5, last, 400)).toBe(202);
+        expect(segmentAfter(590, last, 400)).toBe(198);
+    });
+
     test('a job shifted by 7 s holds 267 s in the segment labelled 274 s', () => {
         expect(segmentHolding(unitIndex(), 267, 7)).toBe(91);
         expect(segmentHolding(unitIndex(), 267, 0)).toBe(89);
@@ -257,5 +268,31 @@ describe('FrameStore builds a cold-started transcode\'s units by their frames\' 
             expect(seen.has(segmentNumber) && !refetched).toBe(false);
             seen.add(segmentNumber);
         });
+    });
+});
+
+describe('the scheduler reports a transcode frame at its own time', () => {
+    const { Scheduler } = require('../../src/scheduler.js');
+    // 20260611_161158_Fwd near 640 s: unit 212's label starts at 637.42, its first frame
+    // (by its own time) at 637.44. Pinned to the label, the frame at 640.00 read 639.98.
+    const frames = Array.from({ length: 75 }, (_, i) => ({ timestamp: Math.round((637.44 + i * 0.04) * 1e6) }));
+    const context = (shifted) => ({
+        frameStore: { mediaSource: { unitsMayArriveShifted: shifted }, buffers: new Map([[212, { frames }]]) },
+        segmentIndex: { segments: { 212: { startTime: 637.42 } } },
+        _framesOnTimeline: Scheduler.prototype._framesOnTimeline,
+    });
+    const at = (ctx, t) => Scheduler.prototype._locateFrameIndex.call(ctx, { frames }, t, 'atOrBefore', 637.42);
+    const reported = (ctx, index) => Scheduler.prototype._frameTimestampToMediaTimeSeconds.call(ctx, 212, frames[index].timestamp);
+
+    test('a transcode lands 640.000 on the frame taken at 640.000, and reports 640.000', () => {
+        const ctx = context(true);
+        const index = at(ctx, 640);
+        expect(frames[index].timestamp).toBe(640000000);
+        expect(reported(ctx, index)).toBeCloseTo(640, 6);
+    });
+
+    test('any other source keeps the unit-start pinning it always had', () => {
+        const ctx = context(false);
+        expect(reported(ctx, 0)).toBeCloseTo(637.42, 6);
     });
 });

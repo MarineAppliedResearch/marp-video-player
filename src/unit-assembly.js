@@ -106,16 +106,21 @@ export function unitCoverage(timestampsMicros, unit, frameIntervalSeconds) {
  * segment a minute, and names the same segment again at the edge of it.
  *
  * @param {number} trueTimeSeconds - The time wanted.
- * @param {{segment: number, firstSeconds: number, endSeconds: number}} last - The last
- *   segment decoded: its index, its first frame's time and the time just after its last.
+ * A time after the last segment's final frame is in the next segment, even when it is
+ * still inside that frame's interval: a unit can begin between two frames -- 598.39 s,
+ * between 598.36 and 598.40 -- and asking for the same segment again found nothing new.
+ *
+ * @param {{segment: number, firstSeconds: number, lastFrameSeconds: number, endSeconds: number}} last
+ *   The last segment decoded: its index, its first and final frames' times, and the time
+ *   just after its final frame.
  * @param {number} segmentCount - How many segments the stream has.
  * @returns {number} The segment's index.
  */
 export function segmentAfter(trueTimeSeconds, last, segmentCount) {
     const span = last.endSeconds - last.firstSeconds;
     let segment = last.segment;
-    if (trueTimeSeconds >= last.endSeconds - BOUNDARY_TOLERANCE_SECONDS) {
-        segment = last.segment + 1 + Math.floor((trueTimeSeconds - last.endSeconds) / span + BOUNDARY_TOLERANCE_SECONDS);
+    if (trueTimeSeconds > last.lastFrameSeconds + BOUNDARY_TOLERANCE_SECONDS) {
+        segment = last.segment + 1 + Math.max(0, Math.floor((trueTimeSeconds - last.endSeconds) / span + BOUNDARY_TOLERANCE_SECONDS));
     } else if (trueTimeSeconds < last.firstSeconds - BOUNDARY_TOLERANCE_SECONDS) {
         segment = last.segment - Math.ceil((last.firstSeconds - trueTimeSeconds) / span - BOUNDARY_TOLERANCE_SECONDS);
     }

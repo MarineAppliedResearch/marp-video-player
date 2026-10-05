@@ -23,6 +23,26 @@
 import { createFile, DataStream } from 'mp4box';
 import { SegmentFetcher } from './segment-fetcher.js';
 import { readAudioTrackConfig } from './mp4-audio-config.js';
+import { presentationOffsetTicks } from './demuxer.js';
+
+/**
+ * Moves a sample table onto presentation time, in place: each sample's composition time
+ * less the track's edit-list start. Done once at load so every later use -- the unit
+ * index, the chunks, the audio, a seek's search -- agrees. Without it a B-frame file
+ * showed each picture its reorder delay early: three frames on MARP's dives (#20).
+ *
+ * @param {Array<Object>} samples - mp4box sample info for one track.
+ * @param {number} offsetTicks - The track's edit-list start, in its own ticks.
+ * @returns {void}
+ */
+export function toPresentationTime(samples, offsetTicks) {
+    if (!offsetTicks) {
+        return;
+    }
+    for (const sample of samples) {
+        sample.cts -= offsetTicks;
+    }
+}
 
 /** ftyp+moov measured at ~1.03MB on the reference 1080p item; a little headroom over that. */
 const DEFAULT_INDEX_PREFIX_BYTES = 1_100_000;
@@ -116,6 +136,7 @@ export class Mp4ByteRangeMediaSource {
         if (!this._samples.length) {
             throw new Error('This file has an empty sample table.');
         }
+        toPresentationTime(this._samples, presentationOffsetTicks(iso, track.id));
         this._config = { codec: track.codec, description: this._descriptionBytes(iso, track.id) };
 
         // Read before the unit index is built: units widen their byte ranges
@@ -175,6 +196,7 @@ export class Mp4ByteRangeMediaSource {
             return;
         }
 
+        toPresentationTime(samples, presentationOffsetTicks(iso, track.id));
         this._audioSamples = samples;
         this._audioConfig = config;
     }

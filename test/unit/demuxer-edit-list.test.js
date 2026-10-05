@@ -31,3 +31,21 @@ describe('the presentation offset from a track\'s edit list', () => {
         expect(presentationOffsetTicks(fileWith([{ segment_duration: 500, media_time: -1 }, { segment_duration: 0, media_time: 1536 }]), 1)).toBe(1536);
     });
 });
+
+describe('Direct Play and local files are moved onto presentation time at load', () => {
+    const { toPresentationTime } = require('../../src/media-source-mp4-byte-range.js');
+
+    test('every sample loses the edit list\'s start -- the dives\' 1536 of 12800, three frames', () => {
+        // Decode order I P B B, as a B-frame camera stores them: composition times late by
+        // the reorder delay, which the edit list removes.
+        const samples = [1536, 3072, 2048, 2560].map((cts) => ({ cts, timescale: 12800 }));
+        toPresentationTime(samples, 1536);
+        expect(samples.map((sample) => sample.cts / 12800)).toEqual([0, 0.12, 0.04, 0.08]);
+    });
+
+    test('a file with no edit list is left as it is', () => {
+        const samples = [{ cts: 512, timescale: 12800 }];
+        toPresentationTime(samples, 0);
+        expect(samples[0].cts).toBe(512);
+    });
+});

@@ -1,7 +1,7 @@
 ---
 task: MarineAppliedResearch/marp-video-player#20
 repos: [marp-video-player]
-status: implement
+status: verified
 needs: []
 ---
 
@@ -43,7 +43,7 @@ the player: Jellyfin is not patched.
 - [x] **A3 · architectural · blocking** — answered 2026-09-26: the scheduler's fetch
   priority, caching, eviction and behind sessions stay as they are; the change is in the
   transcode media source and the frame store.
-- [ ] **A5 · scientific/data-meaning · non-blocking** — decides a separate change. Direct Play and local
+- [x] **A5 · scientific/data-meaning · non-blocking** — answered 2026-10-05: fix it here; existing data is not touched (MARP_API#181 A7). Decides a separate change no longer. Direct Play and local
   files use the same raw composition times and ignore the original file's edit list too
   (0.12 s, three frames, on the dives), so they show a picture three frames before the
   reported time. Fixing that changes which frame the desktop shows for a given time,
@@ -71,6 +71,24 @@ the player: Jellyfin is not patched.
 - **2026-09-26** — `_frameTimestampToMediaTimeSeconds` pins each unit's first frame to its
   playlist start. It stays: once units are assembled by true time, their first frame is at
   their start, and the mapping is right.
+
+- **2026-10-05** — Direct Play and local files apply the original's edit list too (A5):
+  they showed every picture three frames early. Measured after: the reported frame is the
+  best match at 45-48 dB against 27-32 for its neighbours, at 250, 300 and 600 s.
+- **2026-10-05** — Jellyfin restarts a job when a segment is asked for behind it or more
+  than 8 ahead (its DynamicHlsController). A unit built from a shifted job walks that job
+  forward, so while it does, fetches that would restart it are held, and the walk asks the
+  job that served its first segment even after routing moves.
+- **2026-10-05** — on a source whose frames carry true timeline times, the scheduler uses
+  them and no longer pins a unit's first frame to its label: that read a frame up to one
+  frame early (639.964 for 640.000 on 20260611_161158_Fwd).
+- **2026-10-05, verification** -- Android emulator (Pixel 7, Android 15, Chrome) against the
+  live Jellyfin, 720p transcode, every point scored against the original's frames: 2026 dive
+  600, 640, 560 s and 2020 dive 267, 250, 600 s all show the reported frame (37.5-40 dB
+  against 27-35), the reported time equals the frame's own, no content-mismatch warning,
+  no failed unit, no frame-pool failure, no crash. Released 0.5.3 at the same points: 4-9 s
+  off, 14 content-mismatch warnings. Seeks: 6-16 s on the emulator, most of it Jellyfin
+  transcoding forward from the keyframe before the target.
 
 ## Plan
 
