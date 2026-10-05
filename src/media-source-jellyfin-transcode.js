@@ -19,6 +19,13 @@ import { SegmentFetcher } from './segment-fetcher.js';
 import { MediaSource } from './media-source.js';
 import { getQualityOptions } from './quality-options.js';
 import { JellyfinPlaybackReporter } from './jellyfin-playback-reporter.js';
+import { isShifted, segmentHolding } from './unit-assembly.js';
+
+/**
+ * Half a frame at 25 fps. The source does not know the frame rate; within this, a
+ * segment's first frame is at its own start and its audio is placed as it always was.
+ */
+const SHIFT_TOLERANCE_SECONDS = 0.02;
 
 /**
  * How far behind the playhead the CLOSE behind session starts its own
@@ -101,6 +108,10 @@ export class JellyfinTranscodeMediaSource {
         // boundary independently.
         this._unitFirstVideoTimestampMicros = new Map();
 
+        // Each demuxed segment's video time range, by its frames' own times: which segments
+        // a shifted unit's sound is in, without guessing and fetching one that is not.
+        this._unitVideoRangeMicros = new Map();
+
         // Behind sessions currently installed, keyed by role, so each can be
         // re-anchored independently: 'close' hugs the playhead and re-anchors
         // often, 'extended' owns the deeper section and rarely does.
@@ -118,6 +129,12 @@ export class JellyfinTranscodeMediaSource {
         this._extendedInFlight = false;
 
         this._maintenanceHandle = null;
+
+        // Jellyfin starts a transcode that begins partway into the file at the keyframe
+        // before the requested segment and keeps the requested labels, so a segment can
+        // hold another unit's time. The frame store builds units by their frames' own
+        // timestamps for a source that says so (see unit-assembly.js).
+        this.unitsMayArriveShifted = true;
 
         // Playback reporting. The factory supplies the session ids from the
         // negotiation that produced this source's own stream.
@@ -208,6 +225,8 @@ export class JellyfinTranscodeMediaSource {
 
         if (unitFirstTimestampMicros !== null) {
             this._unitFirstVideoTimestampMicros.set(unitIndex, unitFirstTimestampMicros);
+            const end = Math.max(...demuxResult.chunks.map((chunk) => chunk.timestamp + chunk.duration));
+            this._unitVideoRangeMicros.set(unitIndex, { from: unitFirstTimestampMicros, to: end });
         }
 
         if (demuxResult.chunks.length === 0 || demuxResult.chunks[0].type !== 'key') {
@@ -231,6 +250,45 @@ export class JellyfinTranscodeMediaSource {
         }
 
         return { ...demuxResult, unitFirstTimestampMicros };
+    }
+
+    /**
+     * Fetches a segment if it is not cached -- or again, when asked -- and demuxes it.
+     *
+     * For the frame store's assembly of a unit from segments that hold other units' time:
+     * the segment wanted is often not the one the scheduler fetched, and one fetched from
+     * a different Jellyfin job holds a different moment under the same index.
+     *
+     * @async
+     * @param {number} segmentIndexNumber - The segment.
+     * @param {Object} [options]
+     * @param {boolean} [options.refetch=false] - Drop the cached bytes and fetch afresh.
+     * @returns {Promise<Object>} As {@link JellyfinTranscodeMediaSource#fetchChunks}.
+     */
+    async fetchSegmentChunks(segmentIndexNumber, { refetch = false } = {}) {
+        this.segmentFetcher.advanceWalk(segmentIndexNumber);
+        if (refetch) {
+            this.segmentFetcher.discardRawBytes(segmentIndexNumber);
+        }
+        // A walk's segments come from the job it is walking (see SegmentFetcher#beginWalk).
+        await this.segmentFetcher.ensureRawBytes(segmentIndexNumber, { session: this.segmentFetcher.walkSession() });
+        return this.fetchChunks(segmentIndexNumber);
+    }
+
+    /**
+     * The frame store is building a unit from a shifted job: hold fetches that would
+     * restart that job until it is done (see SegmentFetcher#beginWalk).
+     *
+     * @param {number} segmentIndexNumber - The segment the walk starts from.
+     * @returns {void}
+     */
+    beginAssembly(segmentIndexNumber) {
+        this.segmentFetcher.beginWalk(segmentIndexNumber);
+    }
+
+    /** @returns {void} */
+    endAssembly() {
+        this.segmentFetcher.endWalk();
     }
 
     /** @returns {boolean} True once a demuxed unit has shown this stream carries usable audio. */
@@ -297,11 +355,57 @@ export class JellyfinTranscodeMediaSource {
                 ? 0
                 : Math.round(unit.startTime * 1e6) - firstVideoTimestampMicros;
 
+        // A segment from a cold-started job holds another unit's moment, sound included.
+        // The picture is built from frames by their own timestamps, so the sound is too:
+        // the samples whose own time is inside this unit, from whichever segments hold them.
+        const shift = timelineOffsetMicros / 1e6;
+        if (firstVideoTimestampMicros !== undefined && isShifted(shift, SHIFT_TOLERANCE_SECONDS * 2)) {
+            return this._audioByOwnTime(unit, shift, initBuffer);
+        }
+
         return {
             ...this._audioConfig,
             chunks: demuxResult.audio ? demuxResult.audio.chunks : [],
             timelineOffsetMicros,
         };
+    }
+
+    /**
+     * One unit's audio samples, taken by their own timestamps from the segments that hold
+     * them in a job shifted by `shiftSeconds`, and placed with no offset.
+     *
+     * @async
+     * @param {{startTime: number, endTime: number}} unit - The unit.
+     * @param {number} shiftSeconds - The shift of the job its own segment came from.
+     * @param {ArrayBuffer} initBuffer - The stream's init segment.
+     * @returns {Promise<Object>} As fetchAudioChunks.
+     */
+    async _audioByOwnTime(unit, shiftSeconds, initBuffer) {
+        const from = Math.round(unit.startTime * 1e6);
+        const to = Math.round(unit.endTime * 1e6);
+        // The segments whose pictures were already found to cover this unit, which is where
+        // its sound is too; a guess from the shift only when none has been demuxed yet.
+        let segments = [...this._unitVideoRangeMicros.entries()]
+            .filter(([, range]) => range.from < to && range.to > from)
+            .map(([index]) => index)
+            .sort((a, b) => a - b);
+        if (segments.length === 0) {
+            const first = segmentHolding(this._segmentIndex, unit.startTime, shiftSeconds);
+            const last = segmentHolding(this._segmentIndex, unit.endTime - 1e-3, shiftSeconds);
+            segments = Array.from({ length: last - first + 1 }, (_, i) => first + i);
+        }
+        const chunks = [];
+        for (const index of segments) {
+            const bytes = await this.segmentFetcher.ensureRawBytes(index);
+            const demux = await demuxSegment(initBuffer, bytes, { includeVideo: false, includeAudio: true });
+            for (const chunk of demux.audio ? demux.audio.chunks : []) {
+                if (chunk.timestamp >= from && chunk.timestamp < to) {
+                    chunks.push(chunk);
+                }
+            }
+        }
+        chunks.sort((a, b) => a.timestamp - b.timestamp);
+        return { ...this._audioConfig, chunks, timelineOffsetMicros: 0 };
     }
 
     /**

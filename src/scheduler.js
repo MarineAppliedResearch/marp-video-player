@@ -314,6 +314,18 @@ export class Scheduler {
     }
 
     /**
+     * Whether the source's decoded frame timestamps are already times on the media
+     * timeline, so no unit-start pinning applies: true for a source that builds units from
+     * frames by their own time (see unit-assembly.js).
+     *
+     * @returns {boolean}
+     */
+    _framesOnTimeline() {
+        const source = this.frameStore && this.frameStore.mediaSource;
+        return Boolean(source && source.unitsMayArriveShifted);
+    }
+
+    /**
      * Maps a decoded frame timestamp onto the stream's media timeline for
      * the segment it belongs to.
      *
@@ -330,6 +342,14 @@ export class Scheduler {
      * @returns {number} Frame time in the playlist/media timeline, in seconds.
      */
     _frameTimestampToMediaTimeSeconds(segmentIndexNumber, frameTimestampMicros) {
+        // A source whose frames carry true timeline times -- Jellyfin's transcode, with its
+        // edit list applied and its units built from frames by their own time -- needs no
+        // pinning, and pinning is wrong there: a unit's first frame can sit up to a frame
+        // after its label's start, which reported that frame's time up to a frame early.
+        if (this._framesOnTimeline()) {
+            return frameTimestampMicros / 1e6;
+        }
+
         const segment = this.segmentIndex.segments[segmentIndexNumber];
         const buffer = this.frameStore.buffers.get(segmentIndexNumber);
         const firstFrame = buffer && buffer.frames[0];
@@ -822,7 +842,11 @@ export class Scheduler {
         // confirmed live: stepping back onto an exact prior frame landed
         // one frame later than intended until this rounding was added.
         const firstFrameTimestamp = gopBuffer.frames[0] ? gopBuffer.frames[0].timestamp : 0;
-        const targetMicros = firstFrameTimestamp + Math.round((targetTimeSeconds - segmentStartTimeSeconds) * 1e6);
+        // On a source whose frames carry true timeline times, the target is compared with
+        // them directly (see _frameTimestampToMediaTimeSeconds).
+        const targetMicros = this._framesOnTimeline()
+            ? Math.round(targetTimeSeconds * 1e6)
+            : firstFrameTimestamp + Math.round((targetTimeSeconds - segmentStartTimeSeconds) * 1e6);
         const frames = gopBuffer.frames;
 
         if (direction === 'atOrBefore') {

@@ -118,6 +118,12 @@ function buildRangeHeaderOptions(byteRangeStart, byteRangeEnd) {
  *
  * @class SegmentFetcher
  */
+/**
+ * How far ahead of its job Jellyfin serves a segment without restarting the job: its
+ * DynamicHlsController restarts beyond 24 / segmentLength segments, 8 at 3 s.
+ */
+const WALK_REACH_SEGMENTS = 8;
+
 export class SegmentFetcher {
     /**
      * @param {Object} segmentIndex - SegmentIndex from {@link module:video-engine/playlist-manager.loadSegmentIndex}.
@@ -134,6 +140,9 @@ export class SegmentFetcher {
 
         // segmentIndex -> ArrayBuffer, insertion order doubles as LRU order.
         this._rawSegmentCache = new Map();
+
+        // A walk holding fetches on one session (beginWalk), or null.
+        this._walk = null;
         this._rawSegmentBytes = 0;
 
         // The scheduler can mark a local neighborhood as protected.
@@ -576,6 +585,124 @@ export class SegmentFetcher {
     }
 
     /**
+     * Holds back, on one Jellyfin session, every fetch that would make Jellyfin restart
+     * that session's transcode job, until {@link SegmentFetcher#endWalk}.
+     *
+     * Jellyfin restarts a job when a segment it has not made yet is asked for behind the
+     * job, or more than 24 s (8 three-second segments) ahead of it -- and a restart
+     * partway into a file begins at the keyframe before, so it shifts every segment after
+     * it (see unit-assembly.js). Building a unit from a shifted job means walking that job
+     * forward to the frames wanted; a prefetch landing elsewhere meanwhile restarts it and
+     * the walk never arrives. Fetches already in flight that would do that are cancelled.
+     *
+     * @param {number} segmentIndexNumber - Where the walk starts.
+     * @returns {void}
+     */
+    beginWalk(segmentIndexNumber) {
+        // The job to walk is the one that served the segment the walk starts from -- not
+        // whatever routing says now, which changes as the playhead moves and the behind
+        // sessions re-anchor, and would hand the walk's next segment to another job.
+        const served = this._rawSegmentCache.get(segmentIndexNumber);
+        const sessionKey = (served && served.sessionKey) || this.sessionKeyFor(segmentIndexNumber);
+        let release;
+        const done = new Promise((resolve) => { release = resolve; });
+        this._walk = { sessionKey, at: segmentIndexNumber, done, release };
+        for (const [index, entry] of this._inFlightFetches) {
+            if (entry.sessionKey === sessionKey && this._restartsWalk(index)) {
+                entry.abortController.abort();
+            }
+        }
+        this._logDebug(`walk: holding fetches on ${this._sessionLabelFor(segmentIndexNumber)} that would restart it, from segment ${segmentIndexNumber}`);
+    }
+
+    /**
+     * Moves the walk to the segment it is about to fetch, so that fetch -- and anything
+     * within reach of it -- is not held.
+     *
+     * @param {number} segmentIndexNumber - The walk's next segment.
+     * @returns {void}
+     */
+    advanceWalk(segmentIndexNumber) {
+        if (this._walk) {
+            this._walk.at = segmentIndexNumber;
+        }
+    }
+
+    /**
+     * The session a walk is walking, for its own fetches, or null when none is.
+     *
+     * @returns {string|null}
+     */
+    walkSession() {
+        return this._walk ? this._walk.sessionKey : null;
+    }
+
+    /**
+     * A segment's URL on one named session: `forward`, or `behind@<startTime>`.
+     *
+     * @param {number} segmentIndexNumber - The segment.
+     * @param {Object} segment - `this.segmentIndex.segments[segmentIndexNumber]`.
+     * @param {string} sessionKey - From {@link SegmentFetcher#sessionKeyFor}.
+     * @returns {string}
+     */
+    _urlOnSession(segmentIndexNumber, segment, sessionKey) {
+        if (sessionKey === 'forward') {
+            return segment.url;
+        }
+        const session = this._behindSessions.find((candidate) => `behind@${candidate.startTimeSeconds}` === sessionKey);
+        const entry = session && session.segments[segmentIndexNumber];
+        return entry ? entry.url : this._resolveSegmentUrl(segmentIndexNumber, segment);
+    }
+
+    /**
+     * Ends the walk and lets every held fetch go.
+     *
+     * @returns {void}
+     */
+    endWalk() {
+        if (!this._walk) {
+            return;
+        }
+        const { release } = this._walk;
+        this._walk = null;
+        release();
+    }
+
+    /**
+     * Whether fetching this segment now would restart the walk's job.
+     *
+     * @param {number} segmentIndexNumber - The segment.
+     * @returns {boolean}
+     */
+    _restartsWalk(segmentIndexNumber) {
+        const walk = this._walk;
+        if (!walk || this.sessionKeyFor(segmentIndexNumber) !== walk.sessionKey) {
+            return false;
+        }
+        return segmentIndexNumber < walk.at || segmentIndexNumber - walk.at > WALK_REACH_SEGMENTS;
+    }
+
+    /**
+     * Drops a segment's cached raw bytes, so the next ensureRawBytes fetches it again.
+     *
+     * For a segment whose cached bytes came from a different Jellyfin transcode job than
+     * the one now running: a job cold-started partway into a file is shifted (see
+     * unit-assembly.js), so two jobs can hold different moments under the same index.
+     * Fetching again lets the job now running serve it.
+     *
+     * @param {number} segmentIndexNumber - Segment index to drop.
+     * @returns {void}
+     */
+    discardRawBytes(segmentIndexNumber) {
+        const entry = this._rawSegmentCache.get(segmentIndexNumber);
+        if (!entry) {
+            return;
+        }
+        this._rawSegmentBytes -= entry.buffer.byteLength;
+        this._rawSegmentCache.delete(segmentIndexNumber);
+    }
+
+    /**
      * Returns a segment's cached raw bytes, if present.
      *
      * No session-routing staleness check is applied, and none is needed:
@@ -672,18 +799,30 @@ export class SegmentFetcher {
      * @throws {Error} When segmentIndexNumber is out of range or the fetch fails.
      * @throws {DOMException} AbortError, when `options.signal` fires before the fetch completes.
      */
-    async fetchSegment(segmentIndexNumber, { signal } = {}) {
+    async fetchSegment(segmentIndexNumber, { signal, session } = {}) {
         const segment = this.segmentIndex.segments[segmentIndexNumber];
         if (!segment) {
             throw new Error(`No segment at index ${segmentIndexNumber}`);
         }
 
-        const url = this._resolveSegmentUrl(segmentIndexNumber, segment);
+        // A walk asks the job it is walking, whatever routing now says (see beginWalk).
+        const sessionKey = session || this.sessionKeyFor(segmentIndexNumber);
+        const url = session ? this._urlOnSession(segmentIndexNumber, segment, session) : this._resolveSegmentUrl(segmentIndexNumber, segment);
 
         const cachedBuffer = this._getFreshCachedBuffer(segmentIndexNumber);
         if (cachedBuffer) {
             this._touch(segmentIndexNumber, cachedBuffer, url);
             return cachedBuffer;
+        }
+
+        // A walk on this session holds anything that would restart its job. Re-checked
+        // as the walk moves: a held fetch the walk itself then needs must go, or the walk
+        // waits on it while it waits on the walk.
+        while (this._restartsWalk(segmentIndexNumber)) {
+            await Promise.race([this._walk.done, new Promise((resolve) => setTimeout(resolve, 50))]);
+        }
+        if (signal && signal.aborted) {
+            throw new DOMException('Segment fetch cancelled while held by a walk', 'AbortError');
         }
 
         const rangeOptions = buildRangeHeaderOptions(segment.byteRangeStart, segment.byteRangeEnd);
@@ -699,7 +838,7 @@ export class SegmentFetcher {
         }
 
         const buffer = await response.arrayBuffer();
-        this._touch(segmentIndexNumber, buffer, url);
+        this._touch(segmentIndexNumber, buffer, url, sessionKey);
         this._evictIfNeeded();
 
         return buffer;
@@ -768,7 +907,7 @@ export class SegmentFetcher {
      * @param {AbortSignal} [options.signal] - Releases this specific call's "want" when it fires.
      * @returns {Promise<ArrayBuffer>} The segment's raw bytes.
      */
-    async ensureRawBytes(segmentIndexNumber, { signal } = {}) {
+    async ensureRawBytes(segmentIndexNumber, { signal, session } = {}) {
         const cachedBuffer = this._getFreshCachedBuffer(segmentIndexNumber);
         if (cachedBuffer) {
             const segment = this.segmentIndex.segments[segmentIndexNumber];
@@ -786,7 +925,7 @@ export class SegmentFetcher {
             const sessionLabel = this._sessionLabelFor(segmentIndexNumber);
             this._logDebug(`segment ${segmentIndexNumber}: fetching raw bytes... [${sessionLabel}]`);
             const abortController = new AbortController();
-            const promise = this.fetchSegment(segmentIndexNumber, { signal: abortController.signal })
+            const promise = this.fetchSegment(segmentIndexNumber, { signal: abortController.signal, session })
                 .then(
                     (buffer) => {
                         this._recordFetchOutcome(segmentIndexNumber, null);
@@ -851,13 +990,15 @@ export class SegmentFetcher {
      * @param {string} url - The URL these bytes came from (or currently correspond to).
      * @returns {void}
      */
-    _touch(segmentIndexNumber, buffer, url) {
+    _touch(segmentIndexNumber, buffer, url, sessionKey) {
         const previousEntry = this._rawSegmentCache.get(segmentIndexNumber);
         if (previousEntry) {
             this._rawSegmentBytes -= previousEntry.buffer.byteLength;
         }
         this._rawSegmentCache.delete(segmentIndexNumber);
-        this._rawSegmentCache.set(segmentIndexNumber, { buffer, url });
+        // Which session served these bytes: a fresh fetch says; a cache hit keeps it.
+        const servedBy = sessionKey || (previousEntry && previousEntry.sessionKey) || null;
+        this._rawSegmentCache.set(segmentIndexNumber, { buffer, url, sessionKey: servedBy });
         this._rawSegmentBytes += buffer.byteLength;
     }
 

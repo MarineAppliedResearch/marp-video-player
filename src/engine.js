@@ -160,8 +160,11 @@ export async function createMarpVideoEngine(canvas, options) {
     });
 
     // Seed the cache with the segment already decoded above rather than
-    // discarding it and re-decoding on the first seek below.
-    frameStore.buffers.set(firstUnit, firstGopBuffer);
+    // discarding it and re-decoding on the first seek below. A transcode
+    // opened partway in can hold frames from seconds earlier than its label;
+    // the frame store files those by their own time instead (see
+    // unit-assembly.js).
+    frameStore.adoptDecoded(firstUnit, firstGopBuffer);
 
     const canvasRenderer = new CanvasRenderer(canvas);
 

@@ -623,3 +623,81 @@ describe('SegmentFetcher#isRawBudgetFull', () => {
         expect(fetcher.isRawBudgetFull()).toBe(true);
     });
 });
+
+describe('SegmentFetcher walk: fetches that would restart the walked Jellyfin job are held', () => {
+    // Thirty 3-second segments, all on the forward session.
+    const LONG_INDEX = {
+        initSegmentUrl: 'https://jellyfin.example.com/videos/init.mp4',
+        segments: Array.from({ length: 30 }, (_, index) => ({
+            index,
+            url: `https://jellyfin.example.com/videos/seg${index}.m4s`,
+            duration: 3,
+            startTime: index * 3,
+            endTime: (index + 1) * 3,
+        })),
+    };
+    const fetched = () => global.fetch.mock.calls.map(([url]) => Number(/seg(\d+)/.exec(url)[1]));
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 120));
+
+    test('within reach goes at once; behind the walk or more than 8 ahead waits until the walk ends', async () => {
+        const fetcher = new SegmentFetcher(LONG_INDEX);
+        fetcher.beginWalk(10);
+
+        const ahead = fetcher.ensureRawBytes(14);
+        const behind = fetcher.ensureRawBytes(9);
+        const far = fetcher.ensureRawBytes(19);
+        await ahead;
+        await tick();
+        expect(fetched()).toEqual([14]);
+
+        fetcher.endWalk();
+        await Promise.all([behind, far]);
+        expect(fetched().sort((a, b) => a - b)).toEqual([9, 14, 19]);
+    });
+
+    test('a held fetch goes as soon as the walk moves to within reach of it', async () => {
+        const fetcher = new SegmentFetcher(LONG_INDEX);
+        fetcher.beginWalk(10);
+        const later = fetcher.ensureRawBytes(20);
+        await tick();
+        expect(fetched()).toEqual([]);
+        fetcher.advanceWalk(13);
+        await later;
+        expect(fetched()).toEqual([20]);
+        fetcher.endWalk();
+    });
+});
+
+describe('SegmentFetcher walk: a walk stays on the job that served its first segment', () => {
+    const SESSIONED = {
+        initSegmentUrl: 'https://jellyfin.example.com/videos/init.mp4',
+        segments: Array.from({ length: 30 }, (_, index) => ({
+            index,
+            url: `https://jellyfin.example.com/forward/seg${index}.m4s`,
+            duration: 3,
+            startTime: index * 3,
+            endTime: (index + 1) * 3,
+        })),
+    };
+    const behind = {
+        startTimeSeconds: 30,
+        segments: SESSIONED.segments.map((segment) => ({ ...segment, url: segment.url.replace('forward', 'behind') })),
+    };
+
+    test('its next segment is asked of that job, even after routing moves it to another', async () => {
+        const fetcher = new SegmentFetcher(SESSIONED);
+        fetcher.setBehindSessions([behind]);
+        // The playhead is past 15, so 12 is served by the behind session's job.
+        fetcher.setAnchorSegmentIndex(15);
+        await fetcher.ensureRawBytes(12);
+        expect(global.fetch.mock.calls[0][0]).toContain('/behind/seg12');
+
+        // The seek lands, the anchor moves to 12, and routing now sends 15 to the forward
+        // session -- but the walk started on the behind job, and 15 is asked of it.
+        fetcher.beginWalk(12);
+        fetcher.setAnchorSegmentIndex(12);
+        await fetcher.ensureRawBytes(15, { session: fetcher.walkSession() });
+        fetcher.endWalk();
+        expect(global.fetch.mock.calls[1][0]).toContain('/behind/seg15');
+    });
+});
