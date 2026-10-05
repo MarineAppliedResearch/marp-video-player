@@ -3,6 +3,23 @@
 Notable changes to marp-video-player. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.0]
+
+### Fixed
+- A seek on a transcode shows the frame asked for. Jellyfin cold-starts a
+  transcode from the source keyframe before the segment it was asked for and
+  keeps that segment's label, so the pictures arrived up to ten seconds early
+  -- 4 to 9 seconds on a phone. Units are now assembled from the frames' own
+  timestamps, each segment decoded once, and requests that would restart the
+  transcode are held while a unit is assembled.
+- Direct Play and local files apply the MP4 edit list, so a picture is no
+  longer two or three frames before its reported time.
+
+### Changed
+- On a transcode the reported time is the frame's own timestamp rather than a
+  unit's start. Minor rather than patch for that: the host contract is the
+  same, the frames shown for a given time are not.
+
 ## [0.5.3]
 
 ### Fixed
