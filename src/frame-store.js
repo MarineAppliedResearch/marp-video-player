@@ -21,6 +21,22 @@
  * @module video-engine/frame-store
  */
 
+import { segmentShiftSeconds, isShifted, unitForTimestamp, unitCoverage, segmentHolding, segmentAfter } from './unit-assembly.js';
+
+/**
+ * How many segments one unit's assembly may fetch and decode before it gives up. A job
+ * shifted by under a GOP needs its own segment plus two more; the rest is room for a gap
+ * left between two Jellyfin jobs' segments, each fetched again once.
+ */
+const MAX_ASSEMBLY_SEGMENTS = 10;
+
+/**
+ * How many units may hold frames while still incomplete, besides the one being built. A
+ * shifted job's segment feeds two units, so one neighbour on each side is all normal
+ * playback needs; beyond that the farthest is closed rather than left to grow.
+ */
+const MAX_PARTIAL_UNITS = 2;
+
 /** Uncompressed 8-bit 4:2:0: full-res Y plane plus quarter-res U/V planes. */
 const BYTES_PER_PIXEL_420_8BIT = 1.5;
 
@@ -103,6 +119,57 @@ export class FrameStore {
         // Automatic lookahead respects this backoff window.
         // Explicit seek() still bypasses it on purpose.
         this._decodeBackoff = new Map();
+
+        // Only for a source whose segments can hold another unit's time (a cold-started
+        // Jellyfin transcode): unit -> (frame timestamp -> VideoFrame) for units that
+        // have some of their frames but not all, and the shift of the job last seen.
+        this._partials = new Map();
+        this._lastShiftSeconds = 0;
+        this._unitIndex = null;
+
+        // What the last segment decoded for assembly actually held, which predicts where
+        // the next moment is better than a shift does (see segmentAfter).
+        this._lastDecoded = null;
+
+        // Shifted units are built one at a time: each walks one Jellyfin job forward, and
+        // two walks on one session would restart each other's job.
+        this._assemblyQueue = Promise.resolve();
+
+        // Segments whose frames have been filed by their own time, so building a unit
+        // does not decode its own segment again when that segment was already decoded
+        // and its frames went to other units.
+        this._filedSegments = new Set();
+    }
+
+    /**
+     * Takes a segment decoded elsewhere -- the engine's opening unit -- into the cache.
+     *
+     * Exactly as before, it becomes that unit's buffer, unless the source's segments can
+     * hold another unit's time and this one does: then its frames are filed under the
+     * units they belong to, and the unit is built from its own frames when asked for.
+     *
+     * @param {number} segmentIndexNumber - The segment it was decoded as.
+     * @param {Object} gopBuffer - Its GopBuffer.
+     * @returns {void}
+     */
+    adoptDecoded(segmentIndexNumber, gopBuffer) {
+        if (!this.mediaSource.unitsMayArriveShifted || gopBuffer.frames.length === 0) {
+            this.buffers.set(segmentIndexNumber, gopBuffer);
+            return;
+        }
+        if (!this._unitIndex) {
+            this._unitIndex = this.mediaSource.getUnitIndex();
+        }
+        const shift = segmentShiftSeconds(this._unitIndex.segments[segmentIndexNumber], gopBuffer.frames[0].timestamp);
+        if (!isShifted(shift, 1 / this._fps)) {
+            this.buffers.set(segmentIndexNumber, gopBuffer);
+            return;
+        }
+        this._lastShiftSeconds = shift;
+        this._lastDecoded = this._heldBy(segmentIndexNumber, gopBuffer.frames);
+        this._logDebug(`segment ${segmentIndexNumber}: its frames start ${shift.toFixed(3)}s before its label; filing them by their own time`);
+        this._file(gopBuffer.frames, this._unitIndex, segmentIndexNumber);
+        this._filedSegments.add(segmentIndexNumber);
     }
 
     /**
@@ -327,6 +394,10 @@ export class FrameStore {
      * @throws {Error} When segment 0 itself doesn't start with a keyframe (unrecoverable).
      */
     async _decode(segmentIndexNumber) {
+        if (this.mediaSource.unitsMayArriveShifted) {
+            return this._assemble(segmentIndexNumber);
+        }
+
         // Decode in progress is otherwise invisible from the outside -- a
         // real decode taking a while and a genuine stall both just look
         // like nothing is happening. Logging start and completion here
@@ -357,6 +428,227 @@ export class FrameStore {
         this._touch(segmentIndexNumber);
         this._evictIfNeeded(segmentIndexNumber);
 
+        return gopBuffer;
+    }
+
+    /**
+     * Builds one unit from the decoded frames whose own timestamps fall inside it.
+     *
+     * For a source whose segments can hold another unit's time: a Jellyfin transcode
+     * started partway into a file begins at the keyframe before the requested segment and
+     * keeps the requested labels, so segment N can hold frames from seconds earlier (see
+     * unit-assembly.js). Each segment fetched is decoded once and its frames are filed
+     * under the units they belong to; this unit is handed back once its frames cover it.
+     * A segment that already holds its own time is used exactly as the ordinary path uses
+     * it.
+     *
+     * @async
+     * @param {number} unitIndexNumber - The unit to build.
+     * @returns {Promise<Object>} The unit's GopBuffer.
+     * @throws {Error} When the unit cannot be covered within MAX_ASSEMBLY_SEGMENTS.
+     */
+    _assemble(unitIndexNumber) {
+        const run = this._assemblyQueue.then(() => this._assembleNow(unitIndexNumber));
+        this._assemblyQueue = run.then(() => undefined, () => undefined);
+        return run;
+    }
+
+    /**
+     * The body of {@link FrameStore#_assemble}, run one unit at a time.
+     *
+     * @async
+     * @param {number} unitIndexNumber - The unit to build.
+     * @returns {Promise<Object>} The unit's GopBuffer.
+     */
+    async _assembleNow(unitIndexNumber) {
+        if (this.buffers.has(unitIndexNumber)) {
+            return this.buffers.get(unitIndexNumber);
+        }
+        let walking = false;
+        try {
+            return await this._assembleWalking(unitIndexNumber, () => {
+                if (!walking && this.mediaSource.beginAssembly) {
+                    walking = true;
+                    this.mediaSource.beginAssembly(unitIndexNumber);
+                }
+            });
+        } finally {
+            if (walking && this.mediaSource.endAssembly) {
+                this.mediaSource.endAssembly();
+            }
+        }
+    }
+
+    /**
+     * Builds a unit, calling `startWalk` the first time a segment other than its own is
+     * needed -- an unshifted unit never walks, so ordinary playback is never held.
+     *
+     * @async
+     * @param {number} unitIndexNumber - The unit to build.
+     * @param {function(): void} startWalk - Starts holding fetches that would restart the job.
+     * @returns {Promise<Object>} The unit's GopBuffer.
+     */
+    async _assembleWalking(unitIndexNumber, startWalk) {
+        if (!this._unitIndex) {
+            this._unitIndex = this.mediaSource.getUnitIndex();
+        }
+        const unitIndex = this._unitIndex;
+        const unit = unitIndex.segments[unitIndexNumber];
+        const frameInterval = 1 / this._fps;
+        const decodedHere = new Set();
+
+        for (let attempt = 0; attempt < MAX_ASSEMBLY_SEGMENTS; attempt++) {
+            const held = this._partials.get(unitIndexNumber);
+            const coverage = held
+                ? unitCoverage([...held.keys()].sort((a, b) => a - b), unit, frameInterval)
+                : { complete: false, missingFromSeconds: unit.startTime };
+            if (coverage.complete) {
+                return this._promote(unitIndexNumber);
+            }
+
+            // Its own segment first. After that, the one the last job's shift says holds
+            // the first missing moment -- fetched again if this assembly already decoded
+            // it, because then the bytes cached for it came from another job.
+            const ownFirst = decodedHere.size === 0 && !held && !this._filedSegments.has(unitIndexNumber);
+            const missing = coverage.missingFromSeconds;
+            // Earlier than anything the last job held: never a step backward inside a job
+            // (Jellyfin restarts it there, at a keyframe that can still be after this
+            // moment), but a fresh start at the segment whose own time holds the moment --
+            // it begins at the keyframe before, at or before the moment -- walked forward.
+            const behind = !ownFirst && this._lastDecoded && missing < this._lastDecoded.firstSeconds;
+            const segmentNumber = ownFirst
+                ? unitIndexNumber
+                : behind
+                    ? unitForTimestamp(unitIndex, Math.round(missing * 1e6))
+                    : this._lastDecoded
+                        ? segmentAfter(missing, this._lastDecoded, unitIndex.segments.length)
+                        : segmentHolding(unitIndex, missing, this._lastShiftSeconds);
+            const refetch = behind || decodedHere.has(segmentNumber);
+            decodedHere.add(segmentNumber);
+            if (!ownFirst) {
+                startWalk();
+            }
+
+            this._logDebug(`unit ${unitIndexNumber}: decoding segment ${segmentNumber}${refetch ? ' again, fetched afresh' : ''}...`);
+            const { unitFirstTimestampMicros, ...demuxResult } =
+                await this.mediaSource.fetchSegmentChunks(segmentNumber, { refetch });
+            const decoded = await this.gopDecoder.decodeSegment(segmentNumber, demuxResult);
+
+            // Frames merged in only for decode continuity belong to the segment before,
+            // exactly as on the ordinary path.
+            let frames = decoded.frames;
+            if (unitFirstTimestampMicros !== null) {
+                for (const frame of frames) {
+                    if (frame.timestamp < unitFirstTimestampMicros) frame.close();
+                }
+                frames = frames.filter((frame) => frame.timestamp >= unitFirstTimestampMicros);
+            }
+            if (frames.length === 0) {
+                continue;
+            }
+
+            const shift = segmentShiftSeconds(unitIndex.segments[segmentNumber], frames[0].timestamp);
+            this._lastShiftSeconds = isShifted(shift, frameInterval) ? shift : 0;
+            this._lastDecoded = this._heldBy(segmentNumber, frames);
+
+            if (segmentNumber === unitIndexNumber && !held && !isShifted(shift, frameInterval)) {
+                // The segment holds its own time: today's path, one segment one unit.
+                this._logDebug(`segment ${unitIndexNumber}: ready (${frames.length} frames)`);
+                return this._store(unitIndexNumber, { segmentIndex: unitIndexNumber, frames });
+            }
+
+            this._logDebug(`segment ${segmentNumber}: its frames start ${shift.toFixed(3)}s before its label; filing them by their own time`);
+            this._file(frames, unitIndex, unitIndexNumber);
+            this._filedSegments.add(segmentNumber);
+        }
+
+        throw new Error(`Unit ${unitIndexNumber} could not be covered by its frames within ${MAX_ASSEMBLY_SEGMENTS} segments`);
+    }
+
+    /**
+     * What a decoded segment held: its index, first frame's time, and the time after its last.
+     *
+     * @param {number} segmentNumber - The segment.
+     * @param {Array<VideoFrame>} frames - Its decoded frames, ascending.
+     * @returns {{segment: number, firstSeconds: number, endSeconds: number}}
+     */
+    _heldBy(segmentNumber, frames) {
+        const lastFrameSeconds = frames[frames.length - 1].timestamp / 1e6;
+        return {
+            segment: segmentNumber,
+            firstSeconds: frames[0].timestamp / 1e6,
+            lastFrameSeconds,
+            endSeconds: lastFrameSeconds + 1 / this._fps,
+        };
+    }
+
+    /**
+     * Files decoded frames under the units their own timestamps belong to.
+     *
+     * A frame for a unit already built, or already held, is a duplicate and is closed.
+     *
+     * @param {Array<VideoFrame>} frames - Decoded frames, ascending.
+     * @param {{segments: Array<Object>}} unitIndex - The engine's unit index.
+     * @param {number} buildingIndex - The unit being built, which is never dropped here.
+     * @returns {void}
+     */
+    _file(frames, unitIndex, buildingIndex) {
+        for (const frame of frames) {
+            const owner = unitForTimestamp(unitIndex, frame.timestamp);
+            if (this.buffers.has(owner)) {
+                frame.close();
+                continue;
+            }
+            let held = this._partials.get(owner);
+            if (!held) {
+                held = new Map();
+                this._partials.set(owner, held);
+            }
+            if (held.has(frame.timestamp)) {
+                frame.close();
+            } else {
+                held.set(frame.timestamp, frame);
+            }
+        }
+
+        // Bounded: the partials farthest from the unit being built go first.
+        while (this._partials.size > MAX_PARTIAL_UNITS + 1) {
+            const farthest = [...this._partials.keys()]
+                .filter((index) => index !== buildingIndex)
+                .sort((a, b) => Math.abs(b - buildingIndex) - Math.abs(a - buildingIndex))[0];
+            for (const frame of this._partials.get(farthest).values()) {
+                frame.close();
+            }
+            this._partials.delete(farthest);
+            this._logDebug(`unit ${farthest}: incomplete frames dropped`);
+        }
+    }
+
+    /**
+     * Turns a covered unit's held frames into its GopBuffer.
+     *
+     * @param {number} unitIndexNumber - The unit.
+     * @returns {Object} The GopBuffer.
+     */
+    _promote(unitIndexNumber) {
+        const held = this._partials.get(unitIndexNumber);
+        this._partials.delete(unitIndexNumber);
+        const frames = [...held.values()].sort((a, b) => a.timestamp - b.timestamp);
+        this._logDebug(`segment ${unitIndexNumber}: ready (${frames.length} frames, filed by their own time)`);
+        return this._store(unitIndexNumber, { segmentIndex: unitIndexNumber, frames });
+    }
+
+    /**
+     * Caches a unit's GopBuffer, exactly as the ordinary decode path does.
+     *
+     * @param {number} unitIndexNumber - The unit.
+     * @param {Object} gopBuffer - Its GopBuffer.
+     * @returns {Object} The same GopBuffer.
+     */
+    _store(unitIndexNumber, gopBuffer) {
+        this.buffers.set(unitIndexNumber, gopBuffer);
+        this._touch(unitIndexNumber);
+        this._evictIfNeeded(unitIndexNumber);
         return gopBuffer;
     }
 
@@ -430,6 +722,12 @@ export class FrameStore {
             }
         }
         this.buffers.clear();
+        for (const held of this._partials.values()) {
+            for (const frame of held.values()) {
+                frame.close();
+            }
+        }
+        this._partials.clear();
         this.gopDecoder.close();
     }
 }
